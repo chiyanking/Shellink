@@ -1,7 +1,7 @@
 {
   "name": "@shellink/server",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.4",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -29,7 +29,7 @@
     "test:docker:down": "docker compose -f test/docker/docker-compose.yml down -v"
   },
   "dependencies": {
-    "@shellink/protocol": "0.1.0",
+    "@shellink/protocol": "0.2.4",
     "@fastify/cors": "^11.2.0",
     "@fastify/multipart": "^10.1.0",
     "better-sqlite3": "^12.11.1",

@@ -24,6 +24,17 @@ The GitHub Release body is generated from the matching section in this file
 
 ### Removed
 
+## [0.2.4] - 2026-08-22
+
+### Added
+
+- Optional DeepSeek Harness bundle `shellink-dsh`: talks to a local Shellink daemon over the Unix socket and exposes remote sessions as typed agent tools (open, exec, input, transfer, edit, profiles). Install from npm or a source checkout; the plugin does not embed the session engine or credential store.
+- Approval gate for `shellink-dsh`: ask through DeepSeek Harness `ctx.approval` before opening a session, running a dangerous remote command, writing a `command` profile, switching `MANUAL` back to `AUTO`, or transferring a sensitive path. Grants are one-shot and remembered in-process per agent session only.
+
+### Fixed
+
+- Web UI: connection profile list text can be selected, and the selection highlight uses the theme accent so it is visible against the table background.
+
 ## [0.2.3] - 2026-08-02
 
 ### Changed

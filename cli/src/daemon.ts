@@ -1,9 +1,17 @@
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { SocketClient } from './SocketClient.js'
-import { shellinkPaths } from './paths.js'
+import { SocketClient, shellinkPaths, type SocketClientMessages } from '@shellink/client'
 import { resolveCliLocale, t } from './i18n.js'
+
+function clientMessages(): SocketClientMessages {
+  const locale = resolveCliLocale()
+  return {
+    daemonClosed: t(locale, 'daemonClosed'),
+    daemonNotConnected: t(locale, 'daemonNotConnected'),
+    requestTimedOut: (method) => t(locale, 'requestTimedOut', { method }),
+  }
+}
 
 function selfCommand(): { command: string; args: string[] } {
   if (typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined') {
@@ -13,7 +21,7 @@ function selfCommand(): { command: string; args: string[] } {
 }
 
 export async function connectDaemon(): Promise<SocketClient | null> {
-  const client = new SocketClient(shellinkPaths().socketPath, 1000)
+  const client = new SocketClient(shellinkPaths().socketPath, 1000, clientMessages())
   try { await client.connect(); return client } catch { client.close(); return null }
 }
 

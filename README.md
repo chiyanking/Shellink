@@ -105,9 +105,11 @@ The repository is an npm workspace monorepo with one additional non-workspace di
 | Path | Type | Responsibility |
 | --- | --- | --- |
 | `protocol/` | npm workspace | Versioned RPC methods, MessagePack frames, and Zod schemas |
+| `client/` | npm workspace | Shared Unix-socket RPC client used by the CLI and plugins |
 | `cli/` | npm workspace | `shellink` CLI, daemon lifecycle commands, and terminal UI |
 | `server/` | npm workspace | Unix-socket daemon, session engine, services, HTTP, and WebSocket gateway |
 | `web/` | npm workspace | Vue 3 browser console with xterm.js |
+| `plugin-dsh/` | npm workspace | Optional DeepSeek Harness bundle `shellink-dsh` |
 | `skills/` | plain directory | Agent skills for remote operations and iTerm2 profile import |
 
 The runtime flow is:
@@ -415,8 +417,10 @@ The project has unit, integration, protocol, CLI/TUI, WebSocket, and Docker-back
 
 ```bash
 npm run test:protocol
+npm run test:client
 npm run test:server
 npm run test --workspace=cli
+npm run test:plugin-dsh
 npm run test:server:coverage
 npm run test:coverage:full --workspace=server
 ```

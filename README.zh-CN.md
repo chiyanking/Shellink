@@ -105,9 +105,11 @@ Shellink 的设计围绕这样一种场景：AI 智能体（AI Agent）需要可
 | 路径 | 类型 | 职责 |
 | --- | --- | --- |
 | `protocol/` | npm 工作区（workspace） | 带版本管理的 RPC 方法、MessagePack 帧格式以及 Zod 模式（schema） |
+| `client/` | npm 工作区（workspace） | 供 CLI 与插件复用的 Unix 套接字 RPC 客户端 |
 | `cli/` | npm 工作区（workspace） | `shellink` 命令行（CLI）、守护进程（daemon）生命周期管理命令以及终端界面（TUI） |
 | `server/` | npm 工作区（workspace） | 基于 Unix 套接字（Unix socket）的守护进程（daemon）、会话引擎、各类服务、HTTP 与 WebSocket 网关 |
 | `web/` | npm 工作区（workspace） | 基于 Vue 3 与 xterm.js 的浏览器控制台 |
+| `plugin-dsh/` | npm 工作区（workspace） | 可选的 DeepSeek Harness Bundle `shellink-dsh` |
 | `skills/` | 普通目录 | 用于远程操作以及 iTerm2 连接配置导入的智能体技能（agent skills） |
 
 运行时的整体流程如下：
@@ -412,8 +414,10 @@ npm run build              # 生产运行时构建
 
 ```bash
 npm run test:protocol
+npm run test:client
 npm run test:server
 npm run test --workspace=cli
+npm run test:plugin-dsh
 npm run test:server:coverage
 npm run test:coverage:full --workspace=server
 ```

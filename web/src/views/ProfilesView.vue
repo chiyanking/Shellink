@@ -192,7 +192,6 @@ const columns = computed<DataTableColumns<Profile>>(() => [
   {
     title: t('common.target'),
     key: 'target',
-    ellipsis: { tooltip: true },
     render: (row) => targetOf(row),
   },
   {
@@ -260,7 +259,13 @@ onMounted(load)
       </NSpace>
     </div>
 
-    <NDataTable :columns="columns" :data="filteredProfiles" :bordered="true" :single-line="false" />
+    <NDataTable
+      class="profiles-table"
+      :columns="columns"
+      :data="filteredProfiles"
+      :bordered="true"
+      :single-line="false"
+    />
 
     <NModal
       v-model:show="showModal"
@@ -376,5 +381,10 @@ onMounted(load)
 }
 .search-wrap :deep(.n-input .n-input__input-el) {
   padding-left: 30px;
+}
+.profiles-table :deep(.n-data-table-th),
+.profiles-table :deep(.n-data-table-td) {
+  user-select: text;
+  -webkit-user-select: text;
 }
 </style>

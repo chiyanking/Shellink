@@ -1,6 +1,6 @@
 {
   "name": "@shellink/cli",
-  "version": "0.1.0",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "bin": { "shellink": "dist/index.js" },
@@ -13,8 +13,9 @@
   },
   "dependencies": {
     "@earendil-works/pi-tui": "0.80.10",
-    "@shellink/protocol": "0.1.0",
-    "@shellink/server": "0.1.0",
+    "@shellink/client": "0.2.4",
+    "@shellink/protocol": "0.2.4",
+    "@shellink/server": "0.2.4",
     "@xterm/headless": "^6.0.0"
   },
   "devDependencies": {
