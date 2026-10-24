@@ -82,7 +82,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/shellink/ui/", http.StripPrefix("/shellink/ui/", s.assets))
 	mux.HandleFunc("GET /shellink/ws/sessions/{id}", s.terminalWebSocket)
 	mux.HandleFunc("GET /shellink/ws/events", s.eventsWebSocket)
-	return s.cors(s.auth(mux))
+	return logRequests(s.cors(s.auth(mux)))
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {

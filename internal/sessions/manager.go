@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,6 +132,7 @@ func (m *Manager) Create(profileID string, cols, rows int) (protocol.Value, erro
 		}
 		return nil, service.Internal(err)
 	}
+	log.Printf("[Shellink] session=%s event=created profile_id=%s connect_type=%s auth_type=%s password_configured=%t key_configured=%t", id, profile.ID, profile.ConnectType, profile.AuthType, profile.EncryptedPassword != nil, profile.EncryptedPrivateKey != nil)
 	m.mu.Lock()
 	m.live[id] = session
 	m.mu.Unlock()
@@ -198,6 +200,8 @@ func (m *Manager) sessionCommand(profile store.Profile, sessionID string) (strin
 		}
 		executable, _ := os.Executable()
 		env["SHELLINK_ASKPASS_SECRET"] = password
+		env["SHELLINK_SESSION_ID"] = sessionID
+		env["SHELLINK_LOG"] = m.cfg.LogPath
 		env["SSH_ASKPASS"] = executable
 		env["SSH_ASKPASS_REQUIRE"] = "force"
 		if os.Getenv("DISPLAY") == "" {

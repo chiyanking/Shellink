@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"errors"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -84,6 +85,7 @@ func (s *Session) Attach(transport Transport) {
 	s.mu.Lock()
 	s.transport = transport
 	s.mu.Unlock()
+	log.Printf("[Shellink] session=%s event=transport-attached", s.ID)
 	go func() {
 		for output := range transport.Output() {
 			s.handleOutput(output)
@@ -99,6 +101,7 @@ func (s *Session) Attach(transport Transport) {
 		if waitErr != nil && exitCode == nil {
 			reason = "Connection error: " + waitErr.Error()
 		}
+		log.Printf("[Shellink] session=%s event=transport-ended reason=%q exit_code=%v", s.ID, reason, exitCode)
 		s.handleClose(reason, exitCode)
 	}()
 }
@@ -135,11 +138,13 @@ func (s *Session) Write(data string, record bool) error {
 		return errors.New("session is disconnected")
 	}
 	transport := s.transport
+	state, mode := s.state, s.mode
 	var event *Event
 	if record {
 		event = s.recordLocked("input", data, data)
 	}
 	s.mu.Unlock()
+	log.Printf("[Shellink] session=%s event=input bytes=%d mode=%s state=%s", s.ID, len(data), mode, state)
 	if event != nil {
 		s.bus.Publish(*event)
 	}
@@ -164,8 +169,10 @@ func (s *Session) SetMode(mode Mode) {
 		s.mu.Unlock()
 		return
 	}
+	previous := s.mode
 	s.mode = mode
 	s.mu.Unlock()
+	log.Printf("[Shellink] session=%s event=mode previous=%s mode=%s", s.ID, previous, mode)
 	s.bus.Publish(Event{Name: "session.mode", Data: protocol.Object("sessionId", s.ID, "mode", string(mode))})
 }
 
@@ -256,6 +263,7 @@ func (s *Session) handleOutput(raw string) {
 		s.mu.Unlock()
 		return
 	}
+	internal := s.internalDepth > 0
 	plain := StripANSI(raw)
 	s.appendRecentLocked(plain)
 	event := s.recordLocked("output", raw, plain)
@@ -265,6 +273,7 @@ func (s *Session) handleOutput(raw string) {
 	}
 	s.silenceTimer = time.AfterFunc(s.silenceThreshold, s.evaluateSilence)
 	s.mu.Unlock()
+	log.Printf("[Shellink] session=%s event=output bytes=%d internal=%t kind=%s", s.ID, len(raw), internal, outputDiagnosticKind(plain))
 	s.bus.Publish(*event)
 	if stateEvent != nil {
 		s.bus.Publish(*stateEvent)
@@ -306,8 +315,10 @@ func (s *Session) evaluateSilence() {
 	} else if atPrompt {
 		next = WaitingInput
 	}
+	loginPhase := s.loginPhase
 	event := s.transitionLocked(next)
 	s.mu.Unlock()
+	log.Printf("[Shellink] session=%s event=silence login_phase=%t prompt_match=%t next=%s", s.ID, loginPhase, atPrompt, next)
 	if event != nil {
 		s.bus.Publish(*event)
 	}
@@ -324,6 +335,7 @@ func (s *Session) transitionLocked(next State) *Event {
 	s.state = next
 	close(s.stateChanged)
 	s.stateChanged = make(chan struct{})
+	log.Printf("[Shellink] session=%s event=state previous=%s state=%s", s.ID, previous, next)
 	return &Event{Name: "session.state", Data: protocol.Object(
 		"sessionId", s.ID, "state", string(next), "prevState", string(previous), "at", time.Now().UnixMilli(),
 	)}
@@ -341,12 +353,27 @@ func (s *Session) handleClose(reason string, exitCode *int) {
 	}
 	stateEvent := s.transitionLocked(Disconnected)
 	s.mu.Unlock()
+	log.Printf("[Shellink] session=%s event=closed reason=%q exit_code=%v", s.ID, reason, exitCode)
 	if stateEvent != nil {
 		s.bus.Publish(*stateEvent)
 	}
 	s.bus.Publish(Event{Name: "session.closed", Data: protocol.Object(
 		"sessionId", s.ID, "reason", reason, "exitCode", exitCode,
 	)})
+}
+
+func outputDiagnosticKind(text string) string {
+	text = strings.ToLower(text)
+	switch {
+	case strings.Contains(text, "permission denied"), strings.Contains(text, "authentication failed"):
+		return "auth-rejected"
+	case strings.Contains(text, "password:"):
+		return "password-prompt"
+	case strings.Contains(text, "gateshell"):
+		return "gate-shell"
+	default:
+		return "terminal-data"
+	}
 }
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|\x1b\([AB012]`)
