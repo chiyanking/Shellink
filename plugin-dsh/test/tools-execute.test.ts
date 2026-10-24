@@ -5,7 +5,7 @@ import { apply } from '../src/tools.js'
 import { Config } from '../src/config.js'
 import { SessionTargetCache } from '../src/tier.js'
 import type { DaemonJobSnapshot, ExecStartResult, HistoryResult, PublicProfile, SessionCreateResult, SessionRow, SessionStateResult } from '../src/types.js'
-import type { RpcClient } from '../src/types.js'
+import type { ShellinkClient } from '../src/types.js'
 
 interface RegisteredTool {
   name: string
@@ -79,7 +79,7 @@ function fakeExec(agent = true): ToolRunContext {
   } as unknown as ToolRunContext
 }
 
-function mockRpc(): RpcClient {
+function mockRpc(): ShellinkClient {
   return {
     request: async (method) => {
       if (method === 'sessions.execStatus') {

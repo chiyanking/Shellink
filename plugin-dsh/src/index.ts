@@ -1,17 +1,17 @@
 /**
- * Shellink daemon client as a Cordis service (`ctx.shellink`).
- * Dispose closes only this process's socket; the daemon and remote sessions stay up.
+ * Shellink HTTP client as a Cordis service (`ctx.shellink`).
+ * Dispose closes only this process's client; the daemon and remote sessions stay up.
  * @module shellink-dsh
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import type { SocketClient } from '@shellink/client'
+import type { ShellinkHttpClient } from './client.js'
 import * as api from './api.js'
 import { Config } from './config.js'
 import type { Config as ConfigValue } from './config.js'
 import { resolveProfileSecrets } from './credentials.js'
-import { ensureDaemon, resolveSocketPath } from './daemon.js'
+import { ensureDaemon, resolveBaseUrl } from './daemon.js'
 import { formatRpcError } from './errors.js'
 import { pollDaemonJob, waitForDaemonJob } from './jobs.js'
 import { awaitWaitingInput } from './ready.js'
@@ -23,7 +23,7 @@ import type {
   ProfileSecretRefs,
   ProfileWriteInput,
   PublicProfile,
-  RpcClient,
+  ShellinkClient,
   SessionCreateResult,
   SessionRow,
   SessionStateResult,
@@ -47,13 +47,13 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Host-side Shellink RPC service. */
+/** Host-side Shellink HTTP service. */
 export class ShellinkService extends Service {
   static inject = ['credentials']
   static Config = Config
 
-  private client: SocketClient | null = null
-  private connecting: Promise<RpcClient> | null = null
+  private client: ShellinkHttpClient | null = null
+  private connecting: Promise<ShellinkClient> | null = null
   readonly settings: ConfigValue
   readonly sessionTargets = new SessionTargetCache()
 
@@ -65,26 +65,19 @@ export class ShellinkService extends Service {
       this.client = null
       this.connecting = null
       this.sessionTargets.clear()
-    }, 'shellink socket teardown')
+    }, 'shellink HTTP client teardown')
   }
 
   /** Lazy-connect to the daemon, starting it when configured. */
-  async ensureClient(): Promise<RpcClient> {
+  async ensureClient(): Promise<ShellinkClient> {
     if (this.client) return this.client
     if (this.connecting) return this.connecting
     this.connecting = (async () => {
-      const socketPath = resolveSocketPath(this.settings.socketPath)
       const client = await ensureDaemon({
-        socketPath,
+        baseUrl: resolveBaseUrl(this.settings.baseUrl),
         autoStart: this.settings.autoStartDaemon,
         timeoutMs: this.settings.daemonReadyTimeoutMs,
         requestTimeoutMs: this.settings.requestTimeoutMs,
-      })
-      client.on('disconnected', () => {
-        if (this.client === client) {
-          this.client = null
-          this.connecting = null
-        }
       })
       this.client = client
       return client

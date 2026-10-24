@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { AppError, RpcErrorCode } from '@shellink/protocol'
 import {
   MissingCredentialError,
   SessionNotReadyError,
   ShellinkBinaryMissingError,
+  ShellinkHttpError,
   formatRpcError,
   notReadyMessage,
 } from '../src/errors.js'
@@ -24,11 +24,11 @@ describe('notReadyMessage', () => {
 })
 
 describe('formatRpcError', () => {
-  it('keeps typed errors and AppError codes', () => {
+  it('keeps typed errors and HTTP status codes', () => {
     expect(formatRpcError(new MissingCredentialError('PROD_PW'))).toContain('PROD_PW')
     expect(formatRpcError(new ShellinkBinaryMissingError())).toContain('PATH')
     expect(formatRpcError(new SessionNotReadyError('s1', 'IDLE', 'AUTO', 'idle now'))).toBe('idle now')
-    expect(formatRpcError(new AppError(RpcErrorCode.NOT_FOUND, 'missing', 404))).toBe('NOT_FOUND: missing')
+    expect(formatRpcError(new ShellinkHttpError(404, 'missing'))).toBe('HTTP_404: missing')
     expect(formatRpcError(new Error('plain'))).toBe('plain')
     expect(formatRpcError(42)).toBe('42')
   })

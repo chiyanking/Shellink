@@ -1,4 +1,3 @@
-import { AppError } from '@shellink/protocol'
 import type { InteractionMode, SessionState } from './types.js'
 
 /** Session is not in AUTO + WAITING_INPUT, so exec/transfer/edit cannot start. */
@@ -34,14 +33,19 @@ export class ShellinkBinaryMissingError extends Error {
   }
 }
 
+export class ShellinkHttpError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message)
+    this.name = 'ShellinkHttpError'
+  }
+}
+
 /** Format a daemon or client failure for the model. */
 export function formatRpcError(error: unknown): string {
   if (error instanceof SessionNotReadyError || error instanceof MissingCredentialError || error instanceof ShellinkBinaryMissingError) {
     return error.message
   }
-  if (error instanceof AppError) {
-    return `${error.code}: ${error.message}`
-  }
+  if (error instanceof ShellinkHttpError) return `HTTP_${error.status}: ${error.message}`
   if (error instanceof Error) return error.message
   return String(error)
 }

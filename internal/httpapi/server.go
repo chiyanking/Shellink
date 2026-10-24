@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /shellink/api/sessions/{id}/upload", s.sessionUpload)
 	mux.HandleFunc("POST /shellink/api/sessions/{id}/edit", s.sessionEdit)
 	mux.HandleFunc("POST /shellink/api/sessions/{id}/mode", s.sessionMode)
+	mux.HandleFunc("POST /shellink/api/sessions/{id}/close", s.sessionClose)
 	mux.HandleFunc("DELETE /shellink/api/sessions/{id}/record", s.sessionRemove)
 	mux.HandleFunc("DELETE /shellink/api/sessions/{id}", s.sessionRemove)
 	mux.HandleFunc("GET /shellink/api/webhooks", s.webhookList)
@@ -328,6 +329,10 @@ func (s *Server) sessionEdit(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) sessionMode(w http.ResponseWriter, r *http.Request) {
 	s.dispatchBody(w, r, "sessions.mode", map[string]any{"id": r.PathValue("id")})
+}
+
+func (s *Server) sessionClose(w http.ResponseWriter, r *http.Request) {
+	s.dispatch(w, "sessions.close", map[string]any{"id": r.PathValue("id")})
 }
 
 func (s *Server) sessionRemove(w http.ResponseWriter, r *http.Request) {

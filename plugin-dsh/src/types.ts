@@ -1,14 +1,10 @@
-import type { ClientSubscription } from '@shellink/client'
-import type { RpcEvent } from '@shellink/protocol'
-
 export type SessionState = 'CONNECTING' | 'OUTPUTTING' | 'IDLE' | 'WAITING_INPUT' | 'DISCONNECTED'
 export type InteractionMode = 'AUTO' | 'MANUAL'
 export type DaemonJobStatus = 'RUNNING' | 'DONE' | 'TIMED_OUT' | 'CANCELED' | 'DISCONNECTED' | 'FAILED'
 export type DaemonJobKind = 'exec' | 'upload' | 'download' | 'edit'
 
-export interface RpcClient {
+export interface ShellinkClient {
   request<T = unknown>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
-  subscribe(params: { sessionId?: string; replay?: boolean }, listener: (event: RpcEvent) => void): Promise<ClientSubscription>
   close(): void
 }
 

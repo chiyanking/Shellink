@@ -1,4 +1,4 @@
-import { DAEMON_JOB_SETTLED, type DaemonJobSnapshot, type ExecStatusResult, type RpcClient } from './types.js'
+import { DAEMON_JOB_SETTLED, type DaemonJobSnapshot, type ExecStatusResult, type ShellinkClient } from './types.js'
 
 export interface JobPollHooks {
   cancel(reason?: string): void
@@ -7,7 +7,7 @@ export interface JobPollHooks {
 }
 
 /** Poll `sessions.execStatus` until the daemon job settles. TIMED_OUT is not settled. */
-export function pollDaemonJob(client: RpcClient, jobId: string, startSeq: number, waitMs = 20_000): JobPollHooks {
+export function pollDaemonJob(client: ShellinkClient, jobId: string, startSeq: number, waitMs = 20_000): JobPollHooks {
   let cursor = startSeq
   let buffer = ''
   let canceled = false
@@ -36,7 +36,7 @@ export function pollDaemonJob(client: RpcClient, jobId: string, startSeq: number
 
 /** Wait for a daemon job to settle and return the accumulated output. */
 export async function waitForDaemonJob(
-  client: RpcClient,
+  client: ShellinkClient,
   jobId: string,
   startSeq: number,
   signal?: AbortSignal,

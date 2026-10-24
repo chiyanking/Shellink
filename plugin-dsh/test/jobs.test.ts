@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { pollDaemonJob, waitForDaemonJob } from '../src/jobs.js'
-import type { DaemonJobSnapshot, ExecStatusResult, RpcClient } from '../src/types.js'
+import type { DaemonJobSnapshot, ExecStatusResult, ShellinkClient } from '../src/types.js'
 
 function job(status: DaemonJobSnapshot['status'], id = 'job1'): DaemonJobSnapshot {
   return {
@@ -20,7 +20,7 @@ function job(status: DaemonJobSnapshot['status'], id = 'job1'): DaemonJobSnapsho
   }
 }
 
-function mockStatusClient(replies: ExecStatusResult[]): RpcClient {
+function mockStatusClient(replies: ExecStatusResult[]): ShellinkClient {
   let index = 0
   return {
     request: async (method) => {
@@ -63,7 +63,7 @@ describe('pollDaemonJob', () => {
 
   it('cancel stops polling and requests execCancel', async () => {
     let canceled = false
-    const client: RpcClient = {
+    const client: ShellinkClient = {
       request: async (method) => {
         if (method === 'sessions.execCancel') {
           canceled = true

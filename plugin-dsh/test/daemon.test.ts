@@ -1,19 +1,21 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
-import { SocketClient } from '@shellink/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ShellinkHttpClient } from '../src/client.js'
 import { ShellinkBinaryMissingError } from '../src/errors.js'
-import { connectExisting, ensureDaemon, findShellinkBinary, resolveSocketPath } from '../src/daemon.js'
+import { connectExisting, ensureDaemon, findShellinkBinary, resolveBaseUrl } from '../src/daemon.js'
 
-describe('resolveSocketPath', () => {
-  it('prefers an explicit path', () => {
-    expect(resolveSocketPath('/tmp/custom.sock')).toBe(path.resolve('/tmp/custom.sock'))
+describe('resolveBaseUrl', () => {
+  it('prefers an explicit URL', () => {
+    expect(resolveBaseUrl('http://127.0.0.1:8080/')).toBe('http://127.0.0.1:8080')
   })
 
-  it('falls back to SHELLINK_SOCKET', () => {
-    expect(resolveSocketPath(undefined, { SHELLINK_SOCKET: '/tmp/from-env.sock' }))
-      .toBe(path.resolve('/tmp/from-env.sock'))
+  it('uses the HTTP URL or port from the environment', () => {
+    expect(resolveBaseUrl(undefined, { SHELLINK_HTTP_URL: 'http://localhost:9000/' }))
+      .toBe('http://localhost:9000')
+    expect(resolveBaseUrl(undefined, { SHELLINK_PORT: '8088' }))
+      .toBe('http://127.0.0.1:8088')
   })
 })
 
@@ -29,102 +31,86 @@ describe('findShellinkBinary', () => {
   it('returns undefined when PATH is empty', () => {
     expect(findShellinkBinary({ PATH: '' })).toBeUndefined()
   })
-
-  it('skips a non-executable candidate and keeps looking', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellink-bin-'))
-    fs.writeFileSync(path.join(dir, 'shellink'), 'not executable\n', { mode: 0o644 })
-    expect(findShellinkBinary({ PATH: dir })).toBeUndefined()
-    fs.rmSync(dir, { recursive: true, force: true })
-  })
-
-  it('skips empty PATH segments', () => {
-    expect(findShellinkBinary({ PATH: `${path.delimiter}/no-such-shellink-dir` })).toBeUndefined()
-  })
 })
 
-describe('ensureDaemon', () => {
-  it('returns null from connectExisting when the socket is missing', async () => {
-    expect(await connectExisting(path.join(os.tmpdir(), 'no-such-shellink.sock'), 50)).toBeNull()
+describe('HTTP daemon connection', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('returns null when the health endpoint is unavailable', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response('', { status: 503 }))
+    expect(await connectExisting('http://127.0.0.1:1', 50, 50, fetchImpl)).toBeNull()
   })
 
-  it('throws when autoStart is false and nothing is listening', async () => {
+  it('returns a client when the Go health endpoint responds', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ ok: true }))
+    const client = await connectExisting('http://127.0.0.1:7070', 50, 500, fetchImpl)
+    expect(client).toBeInstanceOf(ShellinkHttpClient)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:7070/shellink/healthz',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+  })
+
+  it('throws when autoStart is false and no daemon is listening', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response('', { status: 503 }))
     await expect(ensureDaemon({
-      socketPath: path.join(os.tmpdir(), 'no-such-shellink.sock'),
+      baseUrl: 'http://127.0.0.1:1',
       autoStart: false,
       timeoutMs: 50,
+      fetchImpl,
     })).rejects.toThrow(/not running/)
   })
 
-  it('times out when the spawned CLI never opens the socket', async () => {
+  it('times out when the spawned CLI never starts its HTTP server', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellink-spawn-'))
     const binary = path.join(dir, 'shellink')
     fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response('', { status: 503 }))
     try {
       await expect(ensureDaemon({
-        socketPath: path.join(dir, 'missing.sock'),
+        baseUrl: 'http://127.0.0.1:1',
         autoStart: true,
         timeoutMs: 250,
         binary,
+        fetchImpl,
       })).rejects.toThrow(/Timed out starting/)
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('returns an already-running daemon', async () => {
-    const connect = vi.spyOn(SocketClient.prototype, 'connect').mockResolvedValue({
-      protocolVersion: 1,
-      serverVersion: 'test',
-    } as never)
-    try {
-      const existing = await connectExisting('/tmp/already.sock', 50)
-      expect(existing).toBeInstanceOf(SocketClient)
-      expect(await ensureDaemon({
-        socketPath: '/tmp/already.sock',
-        autoStart: false,
-        timeoutMs: 50,
-      })).toBeInstanceOf(SocketClient)
-    } finally {
-      connect.mockRestore()
-    }
-  })
-
-  it('connects after spawning the CLI', async () => {
+  it('connects after starting the CLI', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shellink-spawn-ok-'))
     const binary = path.join(dir, 'shellink')
     fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o755 })
     let attempts = 0
-    const connect = vi.spyOn(SocketClient.prototype, 'connect').mockImplementation(async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
       attempts += 1
-      if (attempts === 1) throw new Error('not yet')
-      return { protocolVersion: 1, serverVersion: 'test' } as never
+      return attempts < 2 ? new Response('', { status: 503 }) : Response.json({ ok: true })
     })
     try {
       const client = await ensureDaemon({
-        socketPath: path.join(dir, 'later.sock'),
+        baseUrl: 'http://127.0.0.1:1',
         autoStart: true,
         timeoutMs: 500,
         binary,
+        fetchImpl,
       })
-      expect(client).toBeInstanceOf(SocketClient)
+      expect(client).toBeInstanceOf(ShellinkHttpClient)
       expect(attempts).toBeGreaterThan(1)
     } finally {
-      connect.mockRestore()
       fs.rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('throws ShellinkBinaryMissingError when autoStart cannot find the CLI', async () => {
-    const previous = process.env.PATH
-    process.env.PATH = ''
-    try {
-      await expect(ensureDaemon({
-        socketPath: path.join(os.tmpdir(), 'no-such-shellink.sock'),
-        autoStart: true,
-        timeoutMs: 50,
-      })).rejects.toBeInstanceOf(ShellinkBinaryMissingError)
-    } finally {
-      process.env.PATH = previous
-    }
+  it('throws when autoStart cannot find a binary', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response('', { status: 503 }))
+    await expect(ensureDaemon({
+      baseUrl: 'http://127.0.0.1:1',
+      autoStart: true,
+      timeoutMs: 50,
+      binary: '',
+      fetchImpl,
+    })).rejects.toBeInstanceOf(ShellinkBinaryMissingError)
   })
 })

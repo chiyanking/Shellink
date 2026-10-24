@@ -1,8 +1,8 @@
 # shellink-dsh
 
-可选的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Bundle：把本机 [Shellink](https://github.com/jie123108/Shellink) daemon 暴露成 typed 工具。
+可选的 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) Bundle：通过 Shellink HTTP API 把本机 [Shellink](https://github.com/jie123108/Shellink) daemon 暴露成 typed 工具。
 
-插件只做**客户端**。不内嵌 session 引擎、Web UI 或凭据库。卸载时只关本进程的 Unix socket，daemon 上的远程会话继续活着。
+插件只做**客户端**。不内嵌 session 引擎、Web UI 或凭据库。卸载时只关闭本进程的 HTTP 客户端，daemon 上的远程会话继续运行。插件支持 Windows、macOS 和 Linux。
 
 ## 安全
 
@@ -61,7 +61,7 @@ pnpm dsh web --dump-config
 
 ## 凭据
 
-创建/更新 profile 的工具只接受 `password_ref` / `private_key_ref` / `passphrase_ref`（POSIX 名），不要传明文。先把值写进 `$DSH_HOME/.credentials.yaml` 或进程环境。明文只出现在发给 daemon 的 RPC 载荷里，不会出现在工具结果中，因此不会进 harness 会话日志。
+创建/更新 profile 的工具只接受 `password_ref` / `private_key_ref` / `passphrase_ref`（POSIX 名），不要传明文。先把值写进 `$DSH_HOME/.credentials.yaml` 或进程环境。明文只出现在本地 HTTP 请求中，不会出现在工具结果里，因此不会进 harness 会话日志。
 
 ## 配置
 
@@ -69,10 +69,10 @@ pnpm dsh web --dump-config
 
 | 键 | 默认 | 含义 |
 |---|---|---|
-| `socketPath` | `$SHELLINK_SOCKET` 或平台默认 | daemon socket |
-| `autoStartDaemon` | `true` | socket 不在时执行 `shellink server start` |
+| `baseUrl` | `$SHELLINK_HTTP_URL` 或 `http://127.0.0.1:$SHELLINK_PORT`（默认 `7070`） | 本地 daemon HTTP API |
+| `autoStartDaemon` | `true` | HTTP API 不可用时执行 `shellink server start` |
 | `daemonReadyTimeoutMs` | `10000` | 拉起后等待就绪 |
-| `requestTimeoutMs` | `30000` | 单次 RPC 超时 |
+| `requestTimeoutMs` | `30000` | 单次 HTTP 请求超时 |
 | `waitReadyTimeoutMs` | `30000` | 等待 `AUTO` + `WAITING_INPUT` |
 | `execDefaultTimeoutMs` | `20000` | daemon exec 超时 |
 | `uploadMaxBytes` | `6291456` | 本地读文件上限 |

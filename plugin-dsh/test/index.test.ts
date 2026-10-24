@@ -1,17 +1,15 @@
-import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Config } from '../src/config.js'
 import { MissingCredentialError } from '../src/errors.js'
-import type { PublicProfile, RpcClient, SessionStateResult } from '../src/types.js'
-import type { SocketClient } from '@shellink/client'
+import type { PublicProfile, ShellinkClient, SessionStateResult } from '../src/types.js'
 
 const ensureDaemon = vi.hoisted(() => vi.fn())
-const resolveSocketPath = vi.hoisted(() => vi.fn((value?: string) => value ?? '/tmp/mock.sock'))
+const resolveBaseUrl = vi.hoisted(() => vi.fn((value?: string) => value ?? 'http://127.0.0.1:7070'))
 
 vi.mock('../src/daemon.js', () => ({
   ensureDaemon,
-  resolveSocketPath,
+  resolveBaseUrl,
 }))
 
 import ShellinkService, { formatShellinkError, inject, name } from '../src/index.js'
@@ -43,75 +41,68 @@ function waiting(id = 's1'): SessionStateResult {
   return { id, state: 'WAITING_INPUT', mode: 'AUTO', active: true }
 }
 
-function fakeClient(): SocketClient & RpcClient {
-  const emitter = new EventEmitter()
-  const client = emitter as SocketClient & RpcClient
-  client.request = async (method, params) => {
-    if (method === 'profiles.list') return [profile()]
-    if (method === 'profiles.get') return profile((params as { id: string }).id)
-    if (method === 'profiles.create' || method === 'profiles.update') return profile()
-    if (method === 'profiles.delete') return { ok: true }
-    if (method === 'sessions.list') return []
-    if (method === 'sessions.create') {
-      return { id: 's1', state: 'WAITING_INPUT', mode: 'AUTO', target: '127.0.0.1' }
-    }
-    if (method === 'sessions.state') return waiting()
-    if (method === 'sessions.history') return { cursor: 1, text: 'hi' }
-    if (method === 'sessions.input') return { ok: true, state: 'WAITING_INPUT', lastSeq: 1 }
-    if (method === 'sessions.execStart') {
-      return { jobId: 'job1', status: 'RUNNING', startSeq: 1, state: 'OUTPUTTING' }
-    }
-    if (method === 'sessions.execStatus') {
-      return {
-        job: {
-          id: 'job1',
+function fakeClient(): ShellinkClient {
+  return {
+    request: async (method, params) => {
+      if (method === 'profiles.list') return [profile()]
+      if (method === 'profiles.get') return profile((params as { id: string }).id)
+      if (method === 'profiles.create' || method === 'profiles.update') return profile()
+      if (method === 'profiles.delete') return { ok: true }
+      if (method === 'sessions.list') return []
+      if (method === 'sessions.create') {
+        return { id: 's1', state: 'WAITING_INPUT', mode: 'AUTO', target: '127.0.0.1' }
+      }
+      if (method === 'sessions.state') return waiting()
+      if (method === 'sessions.history') return { cursor: 1, text: 'hi' }
+      if (method === 'sessions.input') return { ok: true, state: 'WAITING_INPUT', lastSeq: 1 }
+      if (method === 'sessions.execStart') {
+        return { jobId: 'job1', status: 'RUNNING', startSeq: 1, state: 'OUTPUTTING' }
+      }
+      if (method === 'sessions.execStatus') {
+        return {
+          job: {
+            id: 'job1',
+            sessionId: 's1',
+            kind: 'exec',
+            command: 'uname',
+            remotePath: null,
+            startSeq: 1,
+            startedAt: 0,
+            endedAt: 1,
+            timeoutMs: 20_000,
+            status: 'DONE',
+            state: 'WAITING_INPUT',
+            error: null,
+            result: null,
+          },
+          output: 'Linux\n',
+          cursor: 2,
+          done: true,
+        }
+      }
+      if (method === 'sessions.mode') return { ok: true, mode: (params as { mode: string }).mode }
+      if (method === 'sessions.close') return { ok: true }
+      if (method === 'sessions.uploadStart' || method === 'sessions.downloadStart' || method === 'sessions.editStart') {
+        return {
+          id: 'xfer1',
           sessionId: 's1',
-          kind: 'exec',
-          command: 'uname',
-          remotePath: null,
+          kind: method.includes('upload') ? 'upload' : method.includes('download') ? 'download' : 'edit',
+          command: null,
+          remotePath: '/tmp/x',
           startSeq: 1,
           startedAt: 0,
-          endedAt: 1,
+          endedAt: null,
           timeoutMs: 20_000,
-          status: 'DONE',
-          state: 'WAITING_INPUT',
+          status: 'RUNNING',
+          state: 'OUTPUTTING',
           error: null,
           result: null,
-        },
-        output: 'Linux\n',
-        cursor: 2,
-        done: true,
-      }
+        }
     }
-    if (method === 'sessions.mode') return { ok: true, mode: (params as { mode: string }).mode }
-    if (method === 'sessions.close') return { ok: true }
-    if (method === 'sessions.uploadStart' || method === 'sessions.downloadStart' || method === 'sessions.editStart') {
-      return {
-        id: 'xfer1',
-        sessionId: 's1',
-        kind: method.includes('upload') ? 'upload' : method.includes('download') ? 'download' : 'edit',
-        command: null,
-        remotePath: '/tmp/x',
-        startSeq: 1,
-        startedAt: 0,
-        endedAt: null,
-        timeoutMs: 20_000,
-        status: 'RUNNING',
-        state: 'OUTPUTTING',
-        error: null,
-        result: null,
-      }
-    }
-    throw new Error(method)
+      throw new Error(method)
+    },
+    close: () => undefined,
   }
-  client.subscribe = async () => ({
-    subscriptionId: 'sub',
-    initial: {},
-    detach: () => undefined,
-    unsubscribe: async () => undefined,
-  })
-  client.close = () => undefined
-  return client
 }
 
 function makeService(secrets: Record<string, string> = { PW: 'secret' }): { ctx: Context; service: ShellinkService } {
@@ -122,13 +113,13 @@ function makeService(secrets: Record<string, string> = { PW: 'secret' }): { ctx:
       return value === undefined ? undefined : { value }
     },
   })
-  const service = new ShellinkService(ctx, Config({ socketPath: '/tmp/mock.sock' }))
+  const service = new ShellinkService(ctx, Config({ baseUrl: 'http://127.0.0.1:7070' }))
   return { ctx, service }
 }
 
 afterEach(() => {
   ensureDaemon.mockReset()
-  resolveSocketPath.mockClear()
+  resolveBaseUrl.mockClear()
 })
 
 describe('ShellinkService', () => {
@@ -138,7 +129,7 @@ describe('ShellinkService', () => {
     expect(formatShellinkError(new Error('x'))).toBe('x')
   })
 
-  it('reuses one daemon client and recovers after disconnect', async () => {
+  it('reuses one daemon HTTP client', async () => {
     const client = fakeClient()
     ensureDaemon.mockResolvedValue(client)
     const { service } = makeService()
@@ -148,10 +139,7 @@ describe('ShellinkService', () => {
     expect(await second).toBe(client)
     expect(ensureDaemon).toHaveBeenCalledTimes(1)
     expect(await service.ensureClient()).toBe(client)
-    client.emit('disconnected')
-    const next = fakeClient()
-    ensureDaemon.mockResolvedValue(next)
-    expect(await service.ensureClient()).toBe(next)
+    expect(resolveBaseUrl).toHaveBeenCalledWith('http://127.0.0.1:7070')
   })
 
   it('clears a failed connect so the next call retries', async () => {
@@ -189,7 +177,7 @@ describe('ShellinkService', () => {
     expect(service.sessionTargets.get('s1')).toBeUndefined()
   })
 
-  it('polls through the live client and fails when disconnected', async () => {
+  it('polls jobs through the connected HTTP client', async () => {
     const client = fakeClient()
     ensureDaemon.mockResolvedValue(client)
     const { service } = makeService()
@@ -206,7 +194,7 @@ describe('ShellinkService', () => {
       .rejects.toBeInstanceOf(MissingCredentialError)
   })
 
-  it('closes the socket when the context effect tears down', async () => {
+  it('closes the HTTP client when the context effect tears down', async () => {
     const client = fakeClient()
     const close = vi.fn()
     client.close = close

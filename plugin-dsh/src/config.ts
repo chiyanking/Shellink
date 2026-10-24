@@ -31,7 +31,7 @@ export interface CompiledApproval {
 
 /** Plugin configuration for the Shellink daemon client. */
 export interface Config {
-  socketPath?: string
+  baseUrl?: string
   autoStartDaemon: boolean
   daemonReadyTimeoutMs: number
   requestTimeoutMs: number
@@ -60,7 +60,7 @@ const ApprovalConfigSchema: Schema<ApprovalConfig> = Schema.object({
 
 /** Schemastery schema with defaults. */
 export const Config: Schema<Config> = Schema.object({
-  socketPath: Schema.string(),
+  baseUrl: Schema.string(),
   autoStartDaemon: Schema.boolean().default(true),
   daemonReadyTimeoutMs: Schema.number().default(10_000),
   requestTimeoutMs: Schema.number().default(30_000),

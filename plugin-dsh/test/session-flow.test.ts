@@ -1,30 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import type { RpcEvent } from '@shellink/protocol'
 import * as api from '../src/api.js'
 import { awaitWaitingInput } from '../src/ready.js'
 import { waitForDaemonJob } from '../src/jobs.js'
-import type { ClientSubscription } from '@shellink/client'
-import type { RpcClient, SessionStateResult } from '../src/types.js'
+import type { ShellinkClient, SessionStateResult } from '../src/types.js'
 
 /** In-memory daemon stand-in covering open → exec → close. */
-function fakeSessionDaemon(): RpcClient {
+function fakeSessionDaemon(): ShellinkClient {
   let state: SessionStateResult = { id: 's1', state: 'CONNECTING', mode: 'AUTO', active: true }
   let seq = 1
-  const listeners = new Set<(event: RpcEvent) => void>()
-  const emit = (event: string, data: unknown) => {
-    for (const listener of listeners) listener({ subscriptionId: 'sub', event, data })
-  }
+  let stateReads = 0
   return {
     request: async (method, params) => {
       const body = (params ?? {}) as Record<string, unknown>
       if (method === 'sessions.create') {
-        queueMicrotask(() => {
-          state = { ...state, state: 'WAITING_INPUT' }
-          emit('session.state', { sessionId: 's1', state: 'WAITING_INPUT', prevState: 'CONNECTING', at: Date.now() })
-        })
         return { id: 's1', state: state.state, mode: 'AUTO', target: 'local' }
       }
-      if (method === 'sessions.state') return state
+      if (method === 'sessions.state') {
+        stateReads += 1
+        if (stateReads > 1) state = { ...state, state: 'WAITING_INPUT' }
+        return state
+      }
       if (method === 'sessions.execStart') {
         return { jobId: 'job1', status: 'RUNNING', startSeq: seq, state: 'OUTPUTTING' }
       }
@@ -56,16 +51,6 @@ function fakeSessionDaemon(): RpcClient {
         return { ok: true }
       }
       throw new Error(`unexpected ${method} ${JSON.stringify(body)}`)
-    },
-    subscribe: async (_params, listener) => {
-      listeners.add(listener)
-      const sub: ClientSubscription = {
-        subscriptionId: 'sub',
-        initial: { state },
-        detach: () => { listeners.delete(listener) },
-        unsubscribe: async () => { listeners.delete(listener) },
-      }
-      return sub
     },
     close: () => undefined,
   }

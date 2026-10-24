@@ -1,8 +1,8 @@
 # shellink-dsh
 
-Optional [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) bundle that exposes a local [Shellink](https://github.com/jie123108/Shellink) daemon as typed agent tools.
+Optional [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) bundle that exposes a local [Shellink](https://github.com/jie123108/Shellink) daemon as typed agent tools over its HTTP API.
 
-The plugin is a **client**. It does not embed the Shellink session engine, Web UI, or credential store. Dispose closes only the plugin's Unix socket; remote sessions stay alive on the daemon.
+The plugin is a **client**. It does not embed the Shellink session engine, Web UI, or credential store. Disposing the plugin closes its HTTP client; remote sessions stay alive on the daemon.
 
 ## Security
 
@@ -33,7 +33,7 @@ From a published package:
 dsh plugin --profile web add shellink-dsh
 ```
 
-From this checkout (after `npm install && npm run build --workspace=plugin-dsh`).
+From this checkout (after `npm install && npm run build --workspace=plugin-dsh`). The plugin uses the Go daemon's local HTTP API and works on Windows, macOS, and Linux.
 
 If `dsh` is on PATH (published CLI):
 
@@ -61,7 +61,7 @@ You should see `id: shellink` and `id: shellink-tools`.
 
 ## Credentials
 
-Profile create/update tools accept `password_ref`, `private_key_ref`, and `passphrase_ref` — POSIX names, never plaintext. Put the values in `$DSH_HOME/.credentials.yaml` or the process environment first. The plaintext is sent only on the daemon RPC and never returned in the tool result, so it does not enter the harness session log.
+Profile create/update tools accept `password_ref`, `private_key_ref`, and `passphrase_ref` — POSIX names, never plaintext. Put the values in `$DSH_HOME/.credentials.yaml` or the process environment first. The plaintext is sent only in the local HTTP request and never returned in the tool result, so it does not enter the harness session log.
 
 ## Configuration
 
@@ -69,10 +69,10 @@ Profile create/update tools accept `password_ref`, `private_key_ref`, and `passp
 
 | key | default | meaning |
 |---|---|---|
-| `socketPath` | `$SHELLINK_SOCKET` or the platform socket | Daemon socket |
-| `autoStartDaemon` | `true` | Run `shellink server start` when the socket is down |
+| `baseUrl` | `$SHELLINK_HTTP_URL` or `http://127.0.0.1:$SHELLINK_PORT` (`7070`) | Local daemon HTTP API |
+| `autoStartDaemon` | `true` | Run `shellink server start` when the HTTP API is unavailable |
 | `daemonReadyTimeoutMs` | `10000` | Wait for the daemon after spawn |
-| `requestTimeoutMs` | `30000` | Per-RPC client timeout |
+| `requestTimeoutMs` | `30000` | Per-request timeout |
 | `waitReadyTimeoutMs` | `30000` | Wait for `AUTO` + `WAITING_INPUT` |
 | `execDefaultTimeoutMs` | `20000` | Daemon exec timeout |
 | `uploadMaxBytes` | `6291456` | Local file read cap |

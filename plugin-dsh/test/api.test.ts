@@ -1,16 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import * as api from '../src/api.js'
-import type { RpcClient } from '../src/types.js'
+import type { ShellinkClient } from '../src/types.js'
 
 describe('api wrappers', () => {
   it('forwards method names and params', async () => {
     const calls: Array<{ method: string; params: unknown }> = []
-    const client: RpcClient = {
+    const client: ShellinkClient = {
       request: async (method, params) => {
         calls.push({ method, params })
         return { ok: true, id: 'x' }
       },
-      subscribe: async () => { throw new Error('unused') },
       close: () => undefined,
     }
     await api.listProfiles(client)
