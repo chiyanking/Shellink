@@ -59,15 +59,34 @@ func (r *Runtime) Start() error {
 	r.bus = sessions.NewBus()
 	r.manager = sessions.NewManager(r.db, r.cfg, r.bus)
 	if err = r.manager.MarkStale(); err != nil {
+		r.manager.CloseAll("Startup failed")
 		r.db.Close()
 		return fmt.Errorf("mark stale sessions: %w", err)
 	}
 	profiles := service.NewProfiles(r.db, r.cfg.MasterKey)
 	r.webhooks = webhooks.New(r.db, r.bus)
 	r.dispatcher = rpc.NewDispatcher(r.cfg, r.db, profiles, r.manager, r.webhooks, r.RequestStop)
+	var httpListener net.Listener
+	if r.cfg.HTTPEnabled {
+		address := net.JoinHostPort(r.cfg.Host, fmt.Sprint(r.cfg.Port))
+		httpListener, err = net.Listen("tcp", address)
+		if err != nil {
+			r.manager.CloseAll("Startup failed")
+			r.db.Close()
+			return fmt.Errorf("listen for HTTP: %w", err)
+		}
+		r.http = &http.Server{
+			Addr: address, Handler: httpapi.New(r.cfg, r.dispatcher, r.manager, r.webhooks, r.bus).Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+	}
 	r.socket = socketrpc.NewServer(r.cfg, r.dispatcher, r.bus, r.manager)
 	address, err := r.socket.ListenAddress()
 	if err != nil {
+		if httpListener != nil {
+			_ = httpListener.Close()
+		}
+		r.manager.CloseAll("Startup failed")
 		r.db.Close()
 		return fmt.Errorf("listen for local RPC: %w", err)
 	}
@@ -78,12 +97,8 @@ func (r *Runtime) Start() error {
 		}
 	}()
 	if r.cfg.HTTPEnabled {
-		r.http = &http.Server{
-			Addr: net.JoinHostPort(r.cfg.Host, fmt.Sprint(r.cfg.Port)), Handler: httpapi.New(r.cfg, r.dispatcher, r.manager, r.webhooks, r.bus).Handler(),
-			ReadHeaderTimeout: 10 * time.Second,
-		}
 		go func() {
-			if serveErr := r.http.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
+			if serveErr := r.http.Serve(httpListener); serveErr != nil && serveErr != http.ErrServerClosed {
 				r.serveErr <- serveErr
 				r.RequestStop()
 			}

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,38 @@ import (
 	"shellink/internal/config"
 	"shellink/internal/protocol"
 )
+
+func TestRuntimeStartupReportsHTTPPortConflictBeforeOpeningRPC(t *testing.T) {
+	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			t.Skip("sandbox does not permit binding a local TCP port")
+		}
+		t.Fatal(err)
+	}
+	defer reserved.Close()
+	port := reserved.Addr().(*net.TCPAddr).Port
+
+	root := t.TempDir()
+	cfg := config.Config{
+		DataHome: root, DBPath: filepath.Join(root, "shellink.db"),
+		SocketPath: filepath.Join(root, "shellink.sock"), LogPath: filepath.Join(root, "shellink.log"),
+		PIDPath: filepath.Join(root, "shellink.pid"), Host: "127.0.0.1", Port: port,
+		HTTPEnabled: true, MaxFrameBytes: 16 << 20, SocketMaxQueueBytes: 4 << 20,
+		TransferMaxBytes: 1 << 20,
+	}
+
+	err = New(cfg).Start()
+	if err == nil || !strings.Contains(err.Error(), "listen for HTTP") {
+		t.Fatalf("Start() error = %v, want HTTP listen error", err)
+	}
+	if _, statErr := os.Stat(cfg.SocketPath); !os.IsNotExist(statErr) {
+		t.Fatalf("RPC socket exists after HTTP startup failure: %v", statErr)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprint(port)) {
+		t.Fatalf("startup error %q does not identify the occupied port %d", err, port)
+	}
+}
 
 func TestRuntimeRPCProfileAndCommandSession(t *testing.T) {
 	root := t.TempDir()

@@ -232,6 +232,10 @@ onMounted(() => {
   // ESC]11;rgb:...ESC\) — those look like typed input and become `11: command not found`
   // after the next Enter.
   term.onData((data) => {
+    if (data === '\x1b') {
+      void router.push('/')
+      return
+    }
     if (
       data.startsWith('\x1b]') ||
       data.startsWith('\x1bP') ||

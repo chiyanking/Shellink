@@ -9,13 +9,17 @@ import (
 
 	"shellink/internal/client"
 	"shellink/internal/config"
+	"shellink/internal/daemon"
 	"shellink/internal/protocol"
 )
 
 type terminalDimensions struct{ cols, rows int }
 
 func runInteractive(cfg config.Config) error {
-	connection, err := client.Connect(cfg, 10*time.Second)
+	if !terminalInput(os.Stdin) || !terminalInput(os.Stdout) {
+		return fmt.Errorf("interactive terminal required")
+	}
+	connection, err := daemon.Ensure(cfg, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -129,13 +133,20 @@ func runTUI(connection *client.Client) error {
 				continue
 			}
 			switch {
-			case bytes.Contains(data, []byte{0x03}) || bytes.Contains(data, []byte("q")):
+			case bytes.Contains(data, []byte{0x03}):
 				return nil
 			case bytes.Equal(data, []byte("1")), bytes.Equal(data, []byte("\t")), bytes.Contains(data, []byte("\x1b[D")):
 				view, selected, query, showHelp = "sessions", 0, "", false
 				refresh()
 			case bytes.Equal(data, []byte("2")), bytes.Contains(data, []byte("\x1b[C")):
 				view, selected, query, showHelp = "profiles", 0, "", false
+				refresh()
+			case bytes.Equal(data, []byte{0x1b}):
+				nextView, exit := dashboardEscapeAction(view)
+				if exit {
+					return nil
+				}
+				view, selected, query, showHelp = nextView, 0, "", false
 				refresh()
 			case bytes.Equal(data, []byte("j")), bytes.Contains(data, []byte("\x1b[B")):
 				if len(items) > 0 {
@@ -162,13 +173,17 @@ func runTUI(connection *client.Client) error {
 							continue
 						}
 						id, _ := protocol.StringValue(protocol.MapValue(value)["id"])
-						if err := runSessionTerminal(connection, input, ticker.C, id, dimensions); err != nil {
-							message = err.Error()
+						if sessionErr := runSessionTerminal(connection, input, ticker.C, id, dimensions); sessionErr != nil {
+							message = sessionErr.Error()
 						}
 					} else {
+						if items[selected]["active"] != true {
+							message = "Session is disconnected and cannot be opened."
+							continue
+						}
 						id, _ := items[selected]["id"].(string)
-						if err := runSessionTerminal(connection, input, ticker.C, id, dimensions); err != nil {
-							message = err.Error()
+						if sessionErr := runSessionTerminal(connection, input, ticker.C, id, dimensions); sessionErr != nil {
+							message = sessionErr.Error()
 						}
 					}
 					refresh()
@@ -187,14 +202,27 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 	subscriptionID, _ := protocol.StringValue(fields["subscriptionId"])
 	initial := protocol.MapValue(fields["initial"])
 	state := protocol.MapValue(initial["state"])
+	if active, ok := protocol.BoolValue(state["active"]); ok && !active {
+		unsubscribeEvents(connection, subscriptionID)
+		return fmt.Errorf("session is disconnected")
+	}
 	mode, _ := protocol.StringValue(state["mode"])
+	sessionState, _ := protocol.StringValue(state["state"])
 	manual := mode == "MANUAL"
 	tookControl := false
+	defer func() {
+		if tookControl {
+			_, _ = connection.Request("sessions.mode", protocol.JSONValue(map[string]any{"id": sessionID, "mode": "AUTO"}), time.Second)
+		}
+		unsubscribeEvents(connection, subscriptionID)
+	}()
 	fmt.Fprint(os.Stdout, "\x1b[2J\x1b[H")
+	defer fmt.Fprint(os.Stdout, "\x1b[?25l")
 	if replay, ok := protocol.StringValue(initial["replay"]); ok {
 		fmt.Fprint(os.Stdout, replay)
 	}
-	fmt.Fprintf(os.Stdout, "\r\n[shellink] session %s | %s | Ctrl+] return | m take control\r\n", sessionID, modeLabel(manual))
+	drawSessionStatus(sessionID, manual, dimensions)
+	setSessionCursor(manual, sessionState)
 	_ = resizeSession(connection, sessionID, dimensions)
 	for {
 		select {
@@ -202,6 +230,7 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 			if current := getTerminalDimensions(); current != dimensions {
 				dimensions = current
 				_ = resizeSession(connection, sessionID, dimensions)
+				drawSessionStatus(sessionID, manual, dimensions)
 			}
 		case event := <-connection.Events():
 			eventFields := protocol.MapValue(event)
@@ -218,7 +247,12 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 			case "session.mode":
 				mode, _ = protocol.StringValue(data["mode"])
 				manual = mode == "MANUAL"
-				fmt.Fprintf(os.Stdout, "\r\n[shellink] mode: %s\r\n", modeLabel(manual))
+				drawSessionStatus(sessionID, manual, dimensions)
+				setSessionCursor(manual, sessionState)
+			case "session.state":
+				nextState, _ := protocol.StringValue(data["state"])
+				sessionState = nextState
+				setSessionCursor(manual, sessionState)
 			case "session.closed":
 				reason, _ := protocol.StringValue(data["reason"])
 				fmt.Fprintf(os.Stdout, "\r\n[shellink] session closed: %s\r\n", reason)
@@ -227,11 +261,7 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 			if !ok || data == nil {
 				return nil
 			}
-			if bytes.Equal(data, []byte{0x1d}) || bytes.Contains(data, []byte("\x1b[93;5u")) {
-				if tookControl {
-					_, _ = connection.Request("sessions.mode", protocol.JSONValue(map[string]any{"id": sessionID, "mode": "AUTO"}), 5*time.Second)
-				}
-				unsubscribeEvents(connection, subscriptionID)
+			if isSessionReturnKey(data) {
 				return nil
 			}
 			if !manual && bytes.Equal(data, []byte("m")) {
@@ -239,14 +269,16 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 					fmt.Fprintf(os.Stdout, "\r\n[shellink] %v\r\n", err)
 				} else {
 					manual, tookControl = true, true
-					fmt.Fprint(os.Stdout, "\r\n[shellink] manual control\r\n")
+					drawSessionStatus(sessionID, manual, dimensions)
+					setSessionCursor(manual, sessionState)
 				}
 				continue
 			}
 			if manual && (bytes.Equal(data, []byte{0x1c}) || bytes.Contains(data, []byte("\x1b[92;5u"))) {
 				if _, err := connection.Request("sessions.mode", protocol.JSONValue(map[string]any{"id": sessionID, "mode": "AUTO"}), 5*time.Second); err == nil {
 					manual, tookControl = false, false
-					fmt.Fprint(os.Stdout, "\r\n[shellink] automatic control\r\n")
+					drawSessionStatus(sessionID, manual, dimensions)
+					setSessionCursor(manual, sessionState)
 				}
 				continue
 			}
@@ -271,11 +303,36 @@ func resizeSession(connection *client.Client, id string, dimensions terminalDime
 	return err
 }
 
+func drawSessionStatus(sessionID string, manual bool, dimensions terminalDimensions) {
+	cols, rows := max(1, dimensions.cols), max(1, dimensions.rows)
+	status := fmt.Sprintf("[shellink] session %s | %s | Esc return | m take control", sessionID, modeLabel(manual))
+	fmt.Fprintf(os.Stdout, "\x1b[s\x1b[%d;1H\x1b[2K%s\x1b[u", rows, padRightVisible(status, max(0, cols-1)))
+}
+
+func setSessionCursor(manual bool, state string) {
+	if manual || state == "WAITING_INPUT" {
+		fmt.Fprint(os.Stdout, "\x1b[?25h")
+		return
+	}
+	fmt.Fprint(os.Stdout, "\x1b[?25l")
+}
+
 func modeLabel(manual bool) string {
 	if manual {
 		return "MANUAL"
 	}
 	return "AUTO (read only)"
+}
+
+func isSessionReturnKey(data []byte) bool {
+	return bytes.Equal(data, []byte{0x1b})
+}
+
+func dashboardEscapeAction(view string) (nextView string, exit bool) {
+	if view == "profiles" {
+		return "sessions", false
+	}
+	return "", true
 }
 
 func drawDashboard(size terminalDimensions, view string, items []map[string]any, selected int, query string, searching bool, message string, help bool) {
@@ -314,7 +371,11 @@ func drawDashboard(size terminalDimensions, view string, items []map[string]any,
 		lines = append(lines, padRightVisible(message, cols))
 	}
 	if help {
-		lines = append(lines, "j/k or arrows move   Enter open   1/2 switch   / search   r refresh   q quit")
+		escapeHint := "Esc quit"
+		if view == "profiles" {
+			escapeHint = "Esc back"
+		}
+		lines = append(lines, fmt.Sprintf("j/k or arrows move   Enter open   1/2 switch   %s   / search   r refresh", escapeHint))
 	} else if len(items) == 0 {
 		if view == "sessions" {
 			lines = append(lines, "No sessions. Press 2 to select a connection profile.")
@@ -340,6 +401,8 @@ func drawDashboard(size terminalDimensions, view string, items []map[string]any,
 				if item["active"] == true {
 					status, _ = item["state"].(string)
 					mode, _ = item["mode"].(string)
+				} else {
+					status = "DISCONNECTED"
 				}
 				row = fmt.Sprintf("%s%-10s %-14s %-7s %-18s %s", marker, displayValue(item["id"]), status, mode, displayValue(item["profileName"]), displayValue(item["target"]))
 			} else {
@@ -348,7 +411,11 @@ func drawDashboard(size terminalDimensions, view string, items []map[string]any,
 			lines = append(lines, padRightVisible(row, cols))
 		}
 	}
-	lines = append(lines, padRightVisible("Enter open/create   m take control   Ctrl+] return   ? help   q quit", cols))
+	footer := "Enter open/create   Esc quit   ? help"
+	if view == "profiles" {
+		footer = "Enter open/create   Esc back   ? help"
+	}
+	lines = append(lines, padRightVisible(footer, cols))
 	if len(lines) > rows {
 		lines = lines[:rows]
 	}
