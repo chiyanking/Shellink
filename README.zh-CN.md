@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js >= 22.19](https://img.shields.io/badge/node-%3E%3D22.19.0-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/built%20with-TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#贡献指南-contributing)
 
 [特性](#特性-features) ·
@@ -86,7 +86,7 @@ CLI/TUI 会话视图（`shellink cli`）：
 - **远程文件编辑：** 使用 `shellink session edit` 进行精确的内容替换。
 - **审计历史与人工监督：** 会话的输入/输出会保留为历史记录，用于审计与回放；`MANUAL`（人工）模式允许人工接管终端，进行监督或应答提示。
 - **CLI/TUI、Web UI、REST 与 WebSocket：** 可根据工作流选择合适的接口，并通过稳定的 `--json` 输出支持自动化处理。
-- **加密的连接配置与可选的单文件二进制：** 凭据（credential）通过 SQLite 加密保护，且 macOS 与 Linux 上均提供基于 Bun 构建的独立二进制文件。
+- **加密的连接配置与独立二进制：** 凭据（credential）通过 SQLite 加密保护，并提供 macOS、Linux 与 Windows Release 二进制。
 
 ## 为什么 Shellink 专为 AI 智能体设计
 
@@ -100,38 +100,35 @@ Shellink 的设计围绕这样一种场景：AI 智能体（AI Agent）需要可
 
 ## 架构（Architecture）
 
-本仓库是一个 npm 工作区（workspace）单体仓库（monorepo），另外还包含一个不属于工作区的目录，用于存放智能体技能（agent skills）：
+仓库根目录中的 Go 程序是 CLI 与守护进程运行时。仓库还包含 Vue Web UI、可选集成和智能体技能：
 
 | 路径 | 类型 | 职责 |
 | --- | --- | --- |
-| `protocol/` | npm 工作区（workspace） | 带版本管理的 RPC 方法、MessagePack 帧格式以及 Zod 模式（schema） |
-| `client/` | npm 工作区（workspace） | 供 CLI 与插件复用的 Unix 套接字 RPC 客户端 |
-| `cli/` | npm 工作区（workspace） | `shellink` 命令行（CLI）、守护进程（daemon）生命周期管理命令以及终端界面（TUI） |
-| `server/` | npm 工作区（workspace） | 基于 Unix 套接字（Unix socket）的守护进程（daemon）、会话引擎、各类服务、HTTP 与 WebSocket 网关 |
-| `web/` | npm 工作区（workspace） | 基于 Vue 3 与 xterm.js 的浏览器控制台 |
-| `plugin-dsh/` | npm 工作区（workspace） | 可选的 DeepSeek Harness Bundle `shellink-dsh` |
+| `cmd/`、`internal/` | Go module | CLI、守护进程、SSH/PTY 会话、RPC、SQLite 存储、HTTP 与 WebSocket 网关 |
+| `web/` | npm 工作区（workspace） | Vue 3 浏览器控制台与 xterm.js；Release 二进制会内嵌该 UI |
+| `plugin-dsh/` | npm 工作区（workspace） | 可选的 DeepSeek Harness 集成 `shellink-dsh` |
 | `skills/` | 普通目录 | 用于远程操作以及 iTerm2 连接配置导入的智能体技能（agent skills） |
+| `cli/`、`client/`、`protocol/`、`server/` | npm 工作区（workspace） | 保留的 TypeScript 源码，用于兼容和包开发 |
 
 运行时的整体流程如下：
 
 ```mermaid
 flowchart LR
-  Client["CLI / TUI"] -->|Unix socket, MessagePack RPC| Daemon["Daemon services"]
+  Client["Go CLI / TUI"] -->|Unix socket or authenticated loopback TCP, MessagePack RPC| Daemon["Go daemon"]
   Daemon --> Sessions["SSH / local PTY sessions"]
   Daemon --> Storage["SQLite state and encrypted credentials"]
   Daemon --> Gateway["HTTP REST / WebSocket gateway / Web UI"]
 ```
 
-Unix 套接字（Unix socket）是主要的本地接口。HTTP、WebSocket 与 Web UI 属于兼容层与浏览器接入层。新的本地自动化脚本应优先使用 CLI，而不是直接实现套接字协议。
+CLI 与守护进程在 macOS/Linux 上使用 Unix 套接字，在 Windows 上使用带认证的回环 TCP 接口。HTTP、WebSocket 与 Web UI 提供浏览器和集成访问。新的本地自动化脚本应优先使用 CLI，而不是直接实现套接字协议。
 
 ## 技术栈（Technology Stack）
 
-- **运行时（Runtime）：** Node.js `>=22.19.0`；Bun 为可选项，用于构建编译后的二进制文件。
-- **语言：** TypeScript，配合 npm 工作区（workspaces）。
-- **服务端（Server）：** Fastify、`ssh2`、`node-pty`、`ws`，以及通过 `better-sqlite3` 和 Drizzle ORM 使用的 SQLite。
-- **协议（Protocol）：** MessagePack 帧格式与 Zod 校验。
-- **Web 端：** Vue 3、Vite、Naive UI、Pinia 以及 xterm.js。
-- **测试：** Vitest，配合 V8 覆盖率工具与基于 Docker 的端到端（end-to-end）测试夹具（fixture）。
+- **运行时（Runtime）：** Go `>=1.26`；Windows 会话使用 ConPTY（Windows 10 1809 或更高版本）。
+- **SSH：** 使用系统 OpenSSH 客户端；Windows 若尚未安装，请启用 OpenSSH Client 功能。
+- **存储与协议：** SQLite 与 MessagePack RPC。
+- **Web 端：** Vue 3、Vite、Naive UI、Pinia 与 xterm.js；重新构建 UI 需要 Node.js 和 npm。
+- **可选集成：** TypeScript 包和智能体技能与 Go 服务运行时分离。
 
 ## 安装（Installation）
 
@@ -143,7 +140,7 @@ Unix 套接字（Unix socket）是主要的本地接口。HTTP、WebSocket 与 W
 
 ### 安装预编译二进制（推荐）
 
-已发布 macOS / Linux 预编译包（`darwin-arm64`、`darwin-x64`、`linux-arm64`、`linux-x64`）。暂不支持 Windows，请从源码构建（见下文）。
+已发布 macOS、Linux 和 Windows Go 二进制（`darwin-arm64`、`darwin-x64`、`linux-arm64`、`linux-x64`、`windows-arm64`、`windows-x64`）。请从[最新 Release](https://github.com/jie123108/Shellink/releases/latest)下载对应文件。Shell 安装脚本目前安装 macOS 与 Linux 版本；Windows 用户可下载 `shellink-windows-x64.exe` 或 `shellink-windows-arm64.exe` 并将其所在目录加入 `PATH`。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jie123108/Shellink/main/install.sh -o /tmp/shellink-install.sh
@@ -187,7 +184,7 @@ shellink upgrade --version v0.2.0
 shellink upgrade --yes
 ```
 
-`shellink upgrade` 仅支持 Bun 预编译安装。源码安装请自行 rebuild，或重跑 `install.sh`。
+`shellink upgrade` 支持 macOS、Linux 和 Windows Release 二进制。源码安装请自行 rebuild，或重跑 `install.sh`。
 下载进度会输出到 stderr，临时网络故障会自动重试。若 GitHub 访问缓慢或不可用，配置代理后重试：
 
 ```bash
@@ -197,30 +194,22 @@ shellink upgrade
 
 ### 从源码安装
 
-环境要求：
+构建 Go 服务的环境要求：
 
-- Node.js 22.19 或更高版本。
-- npm。
+- Go 1.26 或更高版本。
+- Node.js 22.19 或更高版本及 npm（用于构建内嵌 Web UI）。
 - Docker（仅当你需要运行基于 Docker 的端到端测试时才需要）。
-- Bun（仅当你需要构建独立二进制文件时才需要）。
 
 ```bash
 git clone https://github.com/jie123108/Shellink.git
 cd Shellink
 npm install
-npm run build
+npm run build:go
 ```
 
-构建完成后的 CLI 位于 `./node_modules/.bin/shellink`。若要为当前平台构建独立可执行文件：
+Go 独立可执行文件会输出到 `dist/shellink`（Windows 上为 `dist/shellink.exe`）。如果不需要内嵌 Web UI，可在仓库根目录运行 `go build ./cmd/shellink`。
 
-```bash
-npm run build:binary
-mkdir -p "$HOME/.local/bin"
-cp dist/shellink "$HOME/.local/bin/shellink"
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-针对 `macos-arm64`、`macos-x64`、`linux-arm64` 和 `linux-x64` 均提供了交叉构建（cross-build）脚本。
+运行 `npm run build:binary:all` 可构建六个 Release 目标；单个平台可运行 `npm run build:binary:windows-x64` 等对应脚本。Release 构建包含 macOS、Linux 和 Windows 的 amd64 与 arm64 版本。
 
 ## 快速开始（Quick Start）
 
@@ -276,7 +265,7 @@ Shellink 会在伪终端（PTY）中启动该命令，并暴露出与 SSH 会话
 
 #### 客户端模式（Client mode）
 
-`shellink` 可执行文件即为客户端。TUI 命令与资源相关命令（`profile`、`session`、`webhook`）通过 Unix 套接字（Unix socket）连接本地守护进程（daemon）。如果套接字不可用，客户端会以后台（detached）方式启动守护进程，等待其就绪后再发送请求。加上 `--json` 参数可获得稳定的、单行的机器可读输出。
+`shellink` 可执行文件即为客户端。TUI 命令与资源相关命令（`profile`、`session`、`webhook`）在 macOS/Linux 上通过 Unix 套接字连接本地守护进程，在 Windows 上通过带认证的回环接口连接。如果本地接口不可用，客户端会以后台（detached）方式启动守护进程，等待其就绪后再发送请求。加上 `--json` 参数可获得稳定的、单行的机器可读输出。
 
 #### 服务端模式（Server mode）
 
@@ -289,7 +278,7 @@ shellink server stop                  # 停止守护进程
 shellink server run                   # 在前台运行
 ```
 
-`server run` 适用于开发环境或进程管理器（process manager）场景。守护进程始终会启动其 Unix 套接字。HTTP/WebSocket 支持默认启用，可通过 `SHELLINK_HTTP_ENABLED=false` 禁用。HTTP 默认绑定到 `127.0.0.1`；仅在确实需要远程访问时，才设置 `SHELLINK_HOST=0.0.0.0`。
+`server run` 适用于开发环境或进程管理器（process manager）场景。守护进程会启动平台对应的本地 IPC 接口。HTTP/WebSocket 支持默认启用，可通过 `SHELLINK_HTTP_ENABLED=false` 禁用。HTTP 默认绑定到 `127.0.0.1`；仅在确实需要远程访问时，才设置 `SHELLINK_HOST=0.0.0.0`。
 
 来自 `localhost` 或 `127.0.0.1` 的本地请求可以免鉴权，包括永久性的会话记录删除操作。远程 HTTP 与 WebSocket 请求需要携带 `Authorization: Bearer <SHELLINK_TOKEN>`（或现有客户端使用的 WebSocket token 查询参数）。Web UI 会探测 `GET /shellink/api/auth/sensitive-ops` 接口，以决定删除/清除等操作是否需要 token。
 
@@ -378,8 +367,8 @@ python3 skills/shellink-iterm2-import/scripts/import_iterm2.py --guid <guid>
 
 | 变量 | 说明 | 默认值 |
 | --- | --- | --- |
-| `SHELLINK_HOME` | 数据、主密钥（master key）与 PID 文件所在目录 | `$HOME/.Shellink` |
-| `SHELLINK_SOCKET` | Unix 套接字（Unix socket）路径 | 取决于平台的运行时路径 |
+| `SHELLINK_HOME` | 数据、主密钥（master key）与 PID 文件所在目录 | macOS/Linux：`$HOME/.Shellink`；Windows：`%APPDATA%\Shellink` |
+| `SHELLINK_SOCKET` | 本地 IPC 接口覆盖值（macOS/Linux 使用 Unix 套接字） | 取决于平台的运行时路径 |
 | `SHELLINK_LOG` | 守护进程（daemon）日志路径 | `$SHELLINK_HOME/shellink.log` |
 | `SHELLINK_HTTP_ENABLED` | 是否启用 HTTP/WebSocket 兼容服务 | `true` |
 | `SHELLINK_HOST` | HTTP 绑定地址 | `127.0.0.1` |
@@ -389,7 +378,7 @@ python3 skills/shellink-iterm2-import/scripts/import_iterm2.py --guid <guid>
 | `SHELLINK_MASTER_KEY` | 32 字节密钥，以 64 位十六进制字符表示 | 首次启动时自动生成 |
 | `SHELLINK_DB` | SQLite 数据库路径覆盖项 | `$SHELLINK_HOME/shellink.db` |
 | `SHELLINK_MAX_FRAME_BYTES` | 最大 RPC 载荷大小 | `16777216` |
-| `SHELLINK_SOCKET_MAX_QUEUE_BYTES` | 每个 Unix 套接字客户端在触发反压（backpressure）前的最大缓冲字节数 | `4194304` |
+| `SHELLINK_SOCKET_MAX_QUEUE_BYTES` | 每个本地 IPC 客户端在触发反压（backpressure）前的最大缓冲字节数 | `4194304` |
 | `SHELLINK_SILENCE_MS` | 用于状态检测的静默期阈值 | `800` |
 | `SHELLINK_EXEC_TIMEOUT_MS` | 默认命令执行超时时间 | `20000` |
 | `SHELLINK_TRANSFER_MAX_BYTES` | 上传/下载的最大文件大小 | `6291456` |
@@ -410,9 +399,10 @@ npm run build              # 生产运行时构建
 
 ## 测试与覆盖率（Tests and Coverage）
 
-本项目包含单元测试、集成测试、协议（protocol）测试、CLI/TUI 测试、WebSocket 测试，以及基于 Docker 的端到端（end-to-end）测试。
+Go 运行时包含单元测试与集成测试。保留的 TypeScript 包也包含 Vitest 覆盖率测试和基于 Docker 的端到端测试。
 
 ```bash
+go test ./...
 npm run test:protocol
 npm run test:client
 npm run test:server
@@ -422,7 +412,7 @@ npm run test:server:coverage
 npm run test:coverage:full --workspace=server
 ```
 
-服务端覆盖率测试使用 Vitest 的 V8 覆盖率提供者（provider），并强制要求达到以下阈值：
+保留的 TypeScript 服务端覆盖率测试使用 Vitest 的 V8 覆盖率提供者（provider），并强制要求达到以下阈值：
 
 | 指标 | 阈值 |
 | --- | ---: |

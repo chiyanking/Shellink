@@ -18,8 +18,8 @@
 # After install, if the install dir is not on PATH, the script appends an
 # export line to the user's shell profile (~/.bashrc, ~/.zshrc, etc.).
 #
-# Windows is not supported; build from source instead:
-#   https://github.com/jie123108/Shellink#installation
+# The shell installer supports macOS and Linux. Windows users can download
+# the matching .exe from GitHub Releases and add its directory to PATH.
 
 set -eu
 
@@ -59,7 +59,7 @@ run with sudo:
   sudo sh install.sh --dir /usr/local/bin
 
 Supported platforms: macOS/Linux (x64, arm64).
-Windows is not supported; build from source (see repository README).
+Windows binaries are published separately; see the repository README.
 EOF
 }
 
@@ -114,17 +114,12 @@ is_windows() {
 detect_target() {
   if is_windows; then
     cat >&2 <<'EOF'
-error: Windows is not supported by prebuilt Shellink binaries.
+error: this shell installer does not support Windows.
 
-Build from source instead:
-  git clone https://github.com/jie123108/Shellink.git
-  cd Shellink
-  npm install
-  npm run build
-  # CLI: ./node_modules/.bin/shellink
+Download shellink-windows-x64.exe or shellink-windows-arm64.exe from:
+  https://github.com/jie123108/Shellink/releases/latest
 
-Or with Bun for a standalone binary on a supported host:
-  npm run build:binary
+Add the executable's directory to PATH. See the repository README for details.
 EOF
     exit 1
   fi

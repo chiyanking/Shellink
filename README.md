@@ -4,11 +4,11 @@
 
 # Shellink
 
-**One stable CLI and daemon for SSH, local PTY sessions, file transfer, and remote editing — built for AI agents and humans alike.**
+**A Go CLI and daemon for SSH, local PTY sessions, file transfer, and remote editing — built for AI agents and humans alike.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js >= 22.19](https://img.shields.io/badge/node-%3E%3D22.19.0-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/built%20with-TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Go](https://img.shields.io/badge/built%20with-Go-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 
 [Features](#features) ·
@@ -86,7 +86,7 @@ CLI/TUI session view (`shellink cli`):
 - **Remote file editing:** Apply precise replacements with `shellink session edit`.
 - **Audit history and supervision:** Session input/output is retained as history for audit and replay, while `MANUAL` mode lets a human take control and supervise or answer prompts.
 - **CLI/TUI, Web UI, REST, and WebSocket:** Use the interface that fits the workflow, with stable `--json` output for automation.
-- **Encrypted profiles and optional single-file binaries:** Credentials are protected in SQLite, and Bun builds are available for macOS and Linux.
+- **Encrypted profiles and standalone binaries:** Credentials are protected in SQLite, and release binaries are available for macOS, Linux, and Windows.
 
 ## Why Shellink Is Designed for AI Agents
 
@@ -100,38 +100,35 @@ Shellink is designed around the situations where an AI agent needs reliable acce
 
 ## Architecture
 
-The repository is an npm workspace monorepo with one additional non-workspace directory for agent skills:
+The Go program at the repository root is the CLI and daemon runtime. The repository also contains the Vue Web UI, optional integrations, and agent skills:
 
 | Path | Type | Responsibility |
 | --- | --- | --- |
-| `protocol/` | npm workspace | Versioned RPC methods, MessagePack frames, and Zod schemas |
-| `client/` | npm workspace | Shared Unix-socket RPC client used by the CLI and plugins |
-| `cli/` | npm workspace | `shellink` CLI, daemon lifecycle commands, and terminal UI |
-| `server/` | npm workspace | Unix-socket daemon, session engine, services, HTTP, and WebSocket gateway |
-| `web/` | npm workspace | Vue 3 browser console with xterm.js |
-| `plugin-dsh/` | npm workspace | Optional DeepSeek Harness bundle `shellink-dsh` |
+| `cmd/`, `internal/` | Go module | CLI, daemon, SSH/PTY sessions, RPC, SQLite storage, HTTP, and WebSocket gateway |
+| `web/` | npm workspace | Vue 3 browser console with xterm.js; embedded into release binaries |
+| `plugin-dsh/` | npm workspace | Optional DeepSeek Harness integration `shellink-dsh` |
 | `skills/` | plain directory | Agent skills for remote operations and iTerm2 profile import |
+| `cli/`, `client/`, `protocol/`, `server/` | npm workspaces | TypeScript source retained for compatibility and package development |
 
 The runtime flow is:
 
 ```mermaid
 flowchart LR
-  Client["CLI / TUI"] -->|Unix socket, MessagePack RPC| Daemon["Daemon services"]
+  Client["Go CLI / TUI"] -->|Unix socket or authenticated loopback TCP, MessagePack RPC| Daemon["Go daemon"]
   Daemon --> Sessions["SSH / local PTY sessions"]
   Daemon --> Storage["SQLite state and encrypted credentials"]
   Daemon --> Gateway["HTTP REST / WebSocket gateway / Web UI"]
 ```
 
-The Unix socket is the primary local interface. HTTP, WebSocket, and the Web UI are compatibility and browser layers. New local automation should use the CLI rather than implementing the socket protocol directly.
+The CLI and daemon use a Unix socket on macOS/Linux and an authenticated loopback TCP endpoint on Windows. HTTP, WebSocket, and the Web UI provide browser and integration access. New local automation should use the CLI rather than implementing the socket protocol directly.
 
 ## Technology Stack
 
-- **Runtime:** Node.js `>=22.19.0`; Bun is optional for compiled binaries.
-- **Language:** TypeScript with npm workspaces.
-- **Server:** Fastify, `ssh2`, `node-pty`, `ws`, SQLite via `better-sqlite3` and Drizzle ORM.
-- **Protocol:** MessagePack framing and Zod validation.
-- **Web:** Vue 3, Vite, Naive UI, Pinia, and xterm.js.
-- **Testing:** Vitest with V8 coverage and Docker-backed end-to-end fixtures.
+- **Runtime:** Go `>=1.26`; Windows sessions use ConPTY (Windows 10 version 1809 or newer).
+- **SSH:** The system OpenSSH client; install the OpenSSH Client feature on Windows if it is not already available.
+- **Storage and protocol:** SQLite and MessagePack RPC.
+- **Web:** Vue 3, Vite, Naive UI, Pinia, and xterm.js; Node.js and npm are needed to rebuild the UI.
+- **Optional integrations:** TypeScript packages and agent skills remain separate from the Go service runtime.
 
 ## Installation
 
@@ -143,7 +140,7 @@ The Unix socket is the primary local interface. HTTP, WebSocket, and the Web UI 
 
 ### Install binary (recommended)
 
-Prebuilt binaries are published for macOS and Linux (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`). Windows is not supported; build from source instead (see below).
+Go binaries are published for macOS, Linux, and Windows (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, `windows-arm64`, `windows-x64`). Download the matching asset from the [latest release](https://github.com/jie123108/Shellink/releases/latest). The shell installer currently installs macOS and Linux assets; on Windows, download `shellink-windows-x64.exe` or `shellink-windows-arm64.exe` and add its directory to `PATH`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jie123108/Shellink/main/install.sh -o /tmp/shellink-install.sh
@@ -187,7 +184,7 @@ shellink upgrade --version v0.2.0
 shellink upgrade --yes
 ```
 
-`shellink upgrade` only supports Bun prebuilt installs. Source installs should rebuild, or re-run `install.sh`.
+`shellink upgrade` supports release binaries on macOS, Linux, and Windows. Source installs should rebuild, or re-run `install.sh`.
 It displays download progress on stderr and retries transient network failures automatically. If GitHub is slow or unreachable, configure a proxy before retrying:
 
 ```bash
@@ -197,30 +194,22 @@ shellink upgrade
 
 ### From source
 
-Requirements:
+Requirements for the Go service:
 
-- Node.js 22.19 or newer.
-- npm.
+- Go 1.26 or newer.
+- Node.js 22.19 or newer and npm, to build the embedded Web UI.
 - Docker, only if you want to run the Docker-backed end-to-end tests.
-- Bun, only if you want to build a standalone binary.
 
 ```bash
 git clone https://github.com/jie123108/Shellink.git
 cd Shellink
 npm install
-npm run build
+npm run build:go
 ```
 
-The built CLI is available at `./node_modules/.bin/shellink`. To build a standalone executable for the current platform:
+The standalone Go executable is written to `dist/shellink` (`dist/shellink.exe` on Windows). To build without the Web UI, run `go build ./cmd/shellink` from the repository root.
 
-```bash
-npm run build:binary
-mkdir -p "$HOME/.local/bin"
-cp dist/shellink "$HOME/.local/bin/shellink"
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-Cross-build scripts are available for `macos-arm64`, `macos-x64`, `linux-arm64`, and `linux-x64`.
+Build all six release targets with `npm run build:binary:all`, or use `npm run build:binary:windows-x64` (and the corresponding platform script) for one target. Release builds cover macOS, Linux, and Windows on amd64 and arm64.
 
 ## Quick Start
 
@@ -276,7 +265,7 @@ Shellink starts the command in a PTY and exposes the same command, input, histor
 
 #### Client mode
 
-The `shellink` executable is the client. TUI commands and resource commands (`profile`, `session`, and `webhook`) connect to the local daemon through a Unix socket. If the socket is unavailable, the client starts a detached daemon, waits for it to become ready, and then sends the request. Add `--json` for stable, one-line machine-readable output.
+The `shellink` executable is the client. TUI commands and resource commands (`profile`, `session`, and `webhook`) connect to the local daemon through a Unix socket on macOS/Linux or an authenticated loopback endpoint on Windows. If the endpoint is unavailable, the client starts a detached daemon, waits for it to become ready, and then sends the request. Add `--json` for stable, one-line machine-readable output.
 
 #### Server mode
 
@@ -289,7 +278,7 @@ shellink server stop                  # Stop the daemon
 shellink server run                   # Run in the foreground
 ```
 
-`server run` is suitable for development or a process manager. The daemon always starts its Unix socket. HTTP/WebSocket support is enabled by default and can be disabled with `SHELLINK_HTTP_ENABLED=false`. HTTP binds to `127.0.0.1` by default; set `SHELLINK_HOST=0.0.0.0` only when remote access is intentional.
+`server run` is suitable for development or a process manager. The daemon starts its platform-specific local IPC endpoint. HTTP/WebSocket support is enabled by default and can be disabled with `SHELLINK_HTTP_ENABLED=false`. HTTP binds to `127.0.0.1` by default; set `SHELLINK_HOST=0.0.0.0` only when remote access is intentional.
 
 Local requests from `localhost` or `127.0.0.1` can omit authentication, including permanent session-record deletes. Remote HTTP and WebSocket requests require `Authorization: Bearer <SHELLINK_TOKEN>` (or the WebSocket token query parameter used by existing clients). The Web UI probes `GET /shellink/api/auth/sensitive-ops` to decide whether a token is required for delete/purge actions.
 
@@ -381,8 +370,8 @@ It requires Python 3.9 or newer and an available `shellink` executable. Review s
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `SHELLINK_HOME` | Data, master-key, and PID directory | `$HOME/.Shellink` |
-| `SHELLINK_SOCKET` | Unix socket path | Platform-specific runtime path |
+| `SHELLINK_HOME` | Data, master-key, and PID directory | `$HOME/.Shellink` (macOS/Linux), `%APPDATA%\Shellink` (Windows) |
+| `SHELLINK_SOCKET` | Local IPC endpoint override (Unix socket on macOS/Linux) | Platform-specific runtime endpoint |
 | `SHELLINK_LOG` | Daemon log path | `$SHELLINK_HOME/shellink.log` |
 | `SHELLINK_HTTP_ENABLED` | Enable HTTP/WebSocket compatibility services | `true` |
 | `SHELLINK_HOST` | HTTP bind address | `127.0.0.1` |
@@ -392,7 +381,7 @@ It requires Python 3.9 or newer and an available `shellink` executable. Review s
 | `SHELLINK_MASTER_KEY` | 32-byte key as 64 hex characters | Generated on first start |
 | `SHELLINK_DB` | SQLite database path override | `$SHELLINK_HOME/shellink.db` |
 | `SHELLINK_MAX_FRAME_BYTES` | Maximum RPC payload | `16777216` |
-| `SHELLINK_SOCKET_MAX_QUEUE_BYTES` | Maximum buffered bytes per Unix-socket client before backpressure | `4194304` |
+| `SHELLINK_SOCKET_MAX_QUEUE_BYTES` | Maximum buffered bytes per local IPC client before backpressure | `4194304` |
 | `SHELLINK_SILENCE_MS` | Quiet-period threshold for state detection | `800` |
 | `SHELLINK_EXEC_TIMEOUT_MS` | Default command timeout | `20000` |
 | `SHELLINK_TRANSFER_MAX_BYTES` | Maximum upload/download size | `6291456` |
@@ -413,9 +402,10 @@ npm run build              # Production runtime build
 
 ## Tests and Coverage
 
-The project has unit, integration, protocol, CLI/TUI, WebSocket, and Docker-backed end-to-end tests.
+The Go runtime has unit and integration tests. The retained TypeScript packages also have Vitest coverage and Docker-backed end-to-end tests.
 
 ```bash
+go test ./...
 npm run test:protocol
 npm run test:client
 npm run test:server
@@ -425,7 +415,7 @@ npm run test:server:coverage
 npm run test:coverage:full --workspace=server
 ```
 
-Server coverage uses Vitest's V8 provider and enforces these thresholds:
+The retained TypeScript server coverage uses Vitest's V8 provider and enforces these thresholds:
 
 | Metric | Threshold |
 | --- | ---: |

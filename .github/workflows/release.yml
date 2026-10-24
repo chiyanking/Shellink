@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   release:
-    name: Build binaries and publish GitHub Release
+    name: Build Go binaries and publish GitHub Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -52,34 +52,38 @@ jobs:
           node-version: '22.19'
           cache: npm
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          bun-version: latest
+          go-version: '1.26.x'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build standalone binaries
+      - name: Build Web UI
+        run: |
+          npm run build --workspace=web
+          cp -R web/dist/. internal/httpapi/assets/
+          printf 'ready\n' > internal/httpapi/assets/complete.txt
+
+      - name: Build cross-platform Go binaries
         env:
-          SHELLINK_VERSION: ${{ steps.meta.outputs.tag }}
-        run: npm run build:binary:all
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          ldflags="-s -w -X shellink/internal/rpc.Version=${VERSION} -X shellink/internal/rpc.Commit=${COMMIT}"
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$ldflags" -o release-assets/shellink-darwin-arm64 ./cmd/shellink
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$ldflags" -o release-assets/shellink-darwin-x64 ./cmd/shellink
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "$ldflags" -o release-assets/shellink-linux-arm64 ./cmd/shellink
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$ldflags" -o release-assets/shellink-linux-x64 ./cmd/shellink
+          GOOS=windows GOARCH=arm64 go build -trimpath -ldflags "$ldflags" -o release-assets/shellink-windows-arm64.exe ./cmd/shellink
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$ldflags" -o release-assets/shellink-windows-x64.exe ./cmd/shellink
 
       - name: Prepare release assets
         run: |
           set -euo pipefail
-          mkdir -p release-assets
-          for name in \
-            shellink-darwin-arm64 \
-            shellink-darwin-x64 \
-            shellink-linux-arm64 \
-            shellink-linux-x64
-          do
-            src="dist/${name}"
-            test -f "$src"
-            chmod +x "$src"
-            cp "$src" "release-assets/${name}"
-          done
           (
             cd release-assets
             sha256sum shellink-* > SHA256SUMS.txt
@@ -115,6 +119,8 @@ jobs:
             release-assets/shellink-darwin-x64
             release-assets/shellink-linux-arm64
             release-assets/shellink-linux-x64
+            release-assets/shellink-windows-arm64.exe
+            release-assets/shellink-windows-x64.exe
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
