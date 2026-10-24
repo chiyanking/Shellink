@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { SocketClient, shellinkPaths } from '@shellink/client'
 import { ShellinkBinaryMissingError } from './errors.js'
+import { ShellinkHttpClient } from './client.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -25,41 +25,47 @@ export function findShellinkBinary(env: NodeJS.ProcessEnv = process.env): string
   return undefined
 }
 
-/** Try to connect to an already-running daemon. */
+export function resolveBaseUrl(baseUrl?: string, env: NodeJS.ProcessEnv = process.env): string {
+  const configured = baseUrl ?? env.SHELLINK_HTTP_URL
+  const resolved = configured ?? `http://127.0.0.1:${env.SHELLINK_PORT || '7070'}`
+  return new URL(resolved).toString().replace(/\/$/, '')
+}
+
+/** Return an HTTP client when the Go daemon health endpoint is available. */
 export async function connectExisting(
-  socketPath: string,
+  baseUrl: string,
   probeTimeoutMs: number,
   requestTimeoutMs = probeTimeoutMs,
-): Promise<SocketClient | null> {
-  const client = new SocketClient(socketPath, requestTimeoutMs)
+  fetchImpl: typeof fetch = fetch,
+): Promise<ShellinkHttpClient | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), probeTimeoutMs)
   try {
-    await client.connect(probeTimeoutMs)
-    return client
+    const response = await fetchImpl(`${baseUrl}/shellink/healthz`, { signal: controller.signal })
+    if (!response.ok) return null
+    return new ShellinkHttpClient(baseUrl, requestTimeoutMs, fetchImpl)
   } catch {
-    client.close()
     return null
+  } finally {
+    clearTimeout(timer)
   }
 }
 
-/** Resolve the socket path from config or the process environment. */
-export function resolveSocketPath(socketPath?: string, env: NodeJS.ProcessEnv = process.env): string {
-  if (socketPath) return path.resolve(socketPath)
-  return shellinkPaths(env).socketPath
-}
-
-/** Connect to the daemon, optionally spawning `shellink server start`. */
+/** Connect to the Go daemon, optionally spawning `shellink server start`. */
 export async function ensureDaemon(options: {
-  socketPath: string
+  baseUrl: string
   autoStart: boolean
   timeoutMs: number
   requestTimeoutMs?: number
   binary?: string
-}): Promise<SocketClient> {
+  fetchImpl?: typeof fetch
+}): Promise<ShellinkHttpClient> {
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000
-  const existing = await connectExisting(options.socketPath, 1000, requestTimeoutMs)
+  const fetchImpl = options.fetchImpl ?? fetch
+  const existing = await connectExisting(options.baseUrl, 1000, requestTimeoutMs, fetchImpl)
   if (existing) return existing
   if (!options.autoStart) {
-    throw new Error(`Shellink daemon is not running at ${options.socketPath}. Start it with \`shellink server start\` or set autoStartDaemon: true.`)
+    throw new Error(`Shellink daemon is not running at ${options.baseUrl}. Start it with \`shellink server start\` or set autoStartDaemon: true.`)
   }
   const binary = options.binary ?? findShellinkBinary()
   if (!binary) throw new ShellinkBinaryMissingError()
@@ -68,7 +74,7 @@ export async function ensureDaemon(options: {
   const deadline = Date.now() + options.timeoutMs
   while (Date.now() < deadline) {
     await sleep(100)
-    const client = await connectExisting(options.socketPath, 1000, requestTimeoutMs)
+    const client = await connectExisting(options.baseUrl, 1000, requestTimeoutMs, fetchImpl)
     if (client) return client
   }
   throw new Error(`Timed out starting the shellink daemon via \`${binary} server start\`.`)

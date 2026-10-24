@@ -106,9 +106,8 @@ The Go program at the repository root is the CLI and daemon runtime. The reposit
 | --- | --- | --- |
 | `cmd/`, `internal/` | Go module | CLI, daemon, SSH/PTY sessions, RPC, SQLite storage, HTTP, and WebSocket gateway |
 | `web/` | npm workspace | Vue 3 browser console with xterm.js; embedded into release binaries |
-| `plugin-dsh/` | npm workspace | Optional DeepSeek Harness integration `shellink-dsh` |
+| `plugin-dsh/` | npm workspace | Optional DeepSeek Harness adapter using the Go HTTP API |
 | `skills/` | plain directory | Agent skills for remote operations and iTerm2 profile import |
-| `cli/`, `client/`, `protocol/`, `server/` | npm workspaces | TypeScript source retained for compatibility and package development |
 
 The runtime flow is:
 
@@ -128,7 +127,7 @@ The CLI and daemon use a Unix socket on macOS/Linux and an authenticated loopbac
 - **SSH:** The system OpenSSH client; install the OpenSSH Client feature on Windows if it is not already available.
 - **Storage and protocol:** SQLite and MessagePack RPC.
 - **Web:** Vue 3, Vite, Naive UI, Pinia, and xterm.js; Node.js and npm are needed to rebuild the UI.
-- **Optional integrations:** TypeScript packages and agent skills remain separate from the Go service runtime.
+- **Optional integrations:** The DeepSeek Harness adapter remains TypeScript and uses the Go HTTP API; agent skills are independent.
 
 ## Installation
 
@@ -402,33 +401,16 @@ npm run build              # Production runtime build
 
 ## Tests and Coverage
 
-The Go runtime has unit and integration tests. The retained TypeScript packages also have Vitest coverage and Docker-backed end-to-end tests.
+The Go runtime has unit and integration tests. The optional DeepSeek Harness adapter has focused Vitest tests.
 
 ```bash
 go test ./...
-npm run test:protocol
-npm run test:client
-npm run test:server
-npm run test --workspace=cli
 npm run test:plugin-dsh
-npm run test:server:coverage
-npm run test:coverage:full --workspace=server
 ```
-
-The retained TypeScript server coverage uses Vitest's V8 provider and enforces these thresholds:
-
-| Metric | Threshold |
-| --- | ---: |
-| Lines | 98% |
-| Statements | 98% |
-| Functions | 97% |
-| Branches | 90% |
-
-`test:server:coverage` excludes the long-running `extreme` and `abnormal` E2E suites. Use `test:coverage:full` when Docker and the full integration environment are available. HTML and JSON coverage reports are written under `server/coverage/`.
 
 ## Contributing
 
-Bug reports, feature proposals, tests, and documentation improvements are welcome. Please keep credentials out of commits, run the relevant test and build commands before submitting changes, and keep protocol changes synchronized across `protocol/`, `cli/`, and `server/`. Every code submission must include corresponding unit tests, and must not lower any of the coverage thresholds listed above.
+Bug reports, feature proposals, tests, and documentation improvements are welcome. Please keep credentials out of commits and run the relevant Go tests and build commands before submitting changes.
 
 ## License
 

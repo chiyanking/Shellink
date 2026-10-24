@@ -5,38 +5,38 @@ import type {
   ProfileWriteInput,
   PublicProfile,
   RemoteEditResult,
-  RpcClient,
+  ShellinkClient,
   SessionCreateResult,
   SessionRow,
   SessionStateResult,
   TransferMeta,
 } from './types.js'
 
-export function listProfiles(client: RpcClient, query?: string): Promise<PublicProfile[]> {
+export function listProfiles(client: ShellinkClient, query?: string): Promise<PublicProfile[]> {
   return client.request('profiles.list', query === undefined ? {} : { q: query })
 }
 
-export function getProfile(client: RpcClient, id: string): Promise<PublicProfile> {
+export function getProfile(client: ShellinkClient, id: string): Promise<PublicProfile> {
   return client.request('profiles.get', { id })
 }
 
-export function createProfile(client: RpcClient, profile: ProfileWriteInput & { name: string }): Promise<PublicProfile> {
+export function createProfile(client: ShellinkClient, profile: ProfileWriteInput & { name: string }): Promise<PublicProfile> {
   return client.request('profiles.create', profile)
 }
 
-export function updateProfile(client: RpcClient, id: string, profile: ProfileWriteInput): Promise<PublicProfile> {
+export function updateProfile(client: ShellinkClient, id: string, profile: ProfileWriteInput): Promise<PublicProfile> {
   return client.request('profiles.update', { id, profile })
 }
 
-export function deleteProfile(client: RpcClient, id: string): Promise<{ ok: true }> {
+export function deleteProfile(client: ShellinkClient, id: string): Promise<{ ok: true }> {
   return client.request('profiles.delete', { id })
 }
 
-export function listSessions(client: RpcClient): Promise<SessionRow[]> {
+export function listSessions(client: ShellinkClient): Promise<SessionRow[]> {
   return client.request('sessions.list', {})
 }
 
-export function createSession(client: RpcClient, profileId: string, cols?: number, rows?: number): Promise<SessionCreateResult> {
+export function createSession(client: ShellinkClient, profileId: string, cols?: number, rows?: number): Promise<SessionCreateResult> {
   return client.request('sessions.create', {
     profileId,
     ...cols !== undefined ? { cols } : {},
@@ -44,11 +44,11 @@ export function createSession(client: RpcClient, profileId: string, cols?: numbe
   })
 }
 
-export function sessionState(client: RpcClient, id: string): Promise<SessionStateResult> {
+export function sessionState(client: ShellinkClient, id: string): Promise<SessionStateResult> {
   return client.request('sessions.state', { id })
 }
 
-export function sessionHistory(client: RpcClient, id: string, since?: number, limit?: number): Promise<HistoryResult> {
+export function sessionHistory(client: ShellinkClient, id: string, since?: number, limit?: number): Promise<HistoryResult> {
   return client.request('sessions.history', {
     id,
     ...since !== undefined ? { since } : {},
@@ -56,11 +56,11 @@ export function sessionHistory(client: RpcClient, id: string, since?: number, li
   })
 }
 
-export function sessionInput(client: RpcClient, id: string, text: string, appendNewline = true): Promise<{ ok: true; state: string; lastSeq: number }> {
+export function sessionInput(client: ShellinkClient, id: string, text: string, appendNewline = true): Promise<{ ok: true; state: string; lastSeq: number }> {
   return client.request('sessions.input', { id, text, appendNewline })
 }
 
-export function sessionExecStart(client: RpcClient, id: string, command: string, timeoutMs?: number): Promise<ExecStartResult> {
+export function sessionExecStart(client: ShellinkClient, id: string, command: string, timeoutMs?: number): Promise<ExecStartResult> {
   return client.request('sessions.execStart', {
     id,
     command,
@@ -68,16 +68,16 @@ export function sessionExecStart(client: RpcClient, id: string, command: string,
   })
 }
 
-export function sessionMode(client: RpcClient, id: string, mode: 'AUTO' | 'MANUAL'): Promise<{ ok: true; mode: string }> {
+export function sessionMode(client: ShellinkClient, id: string, mode: 'AUTO' | 'MANUAL'): Promise<{ ok: true; mode: string }> {
   return client.request('sessions.mode', { id, mode })
 }
 
-export function sessionClose(client: RpcClient, id: string): Promise<{ ok: true; note?: string }> {
+export function sessionClose(client: ShellinkClient, id: string): Promise<{ ok: true; note?: string }> {
   return client.request('sessions.close', { id })
 }
 
 export function sessionUploadStart(
-  client: RpcClient,
+  client: ShellinkClient,
   id: string,
   remotePath: string,
   data: Uint8Array,
@@ -92,7 +92,7 @@ export function sessionUploadStart(
 }
 
 export function sessionDownloadStart(
-  client: RpcClient,
+  client: ShellinkClient,
   id: string,
   remotePath: string,
   output: string,
@@ -107,7 +107,7 @@ export function sessionDownloadStart(
 }
 
 export function sessionEditStart(
-  client: RpcClient,
+  client: ShellinkClient,
   id: string,
   remotePath: string,
   edits: Array<{ oldText: string; newText: string }>,

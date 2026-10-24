@@ -106,9 +106,8 @@ Shellink 的设计围绕这样一种场景：AI 智能体（AI Agent）需要可
 | --- | --- | --- |
 | `cmd/`、`internal/` | Go module | CLI、守护进程、SSH/PTY 会话、RPC、SQLite 存储、HTTP 与 WebSocket 网关 |
 | `web/` | npm 工作区（workspace） | Vue 3 浏览器控制台与 xterm.js；Release 二进制会内嵌该 UI |
-| `plugin-dsh/` | npm 工作区（workspace） | 可选的 DeepSeek Harness 集成 `shellink-dsh` |
+| `plugin-dsh/` | npm 工作区（workspace） | 使用 Go HTTP API 的可选 DeepSeek Harness 插件 |
 | `skills/` | 普通目录 | 用于远程操作以及 iTerm2 连接配置导入的智能体技能（agent skills） |
-| `cli/`、`client/`、`protocol/`、`server/` | npm 工作区（workspace） | 保留的 TypeScript 源码，用于兼容和包开发 |
 
 运行时的整体流程如下：
 
@@ -128,7 +127,7 @@ CLI 与守护进程在 macOS/Linux 上使用 Unix 套接字，在 Windows 上使
 - **SSH：** 使用系统 OpenSSH 客户端；Windows 若尚未安装，请启用 OpenSSH Client 功能。
 - **存储与协议：** SQLite 与 MessagePack RPC。
 - **Web 端：** Vue 3、Vite、Naive UI、Pinia 与 xterm.js；重新构建 UI 需要 Node.js 和 npm。
-- **可选集成：** TypeScript 包和智能体技能与 Go 服务运行时分离。
+- **可选集成：** DeepSeek Harness 插件仍使用 TypeScript，通过 Go HTTP API 访问服务；智能体技能独立维护。
 
 ## 安装（Installation）
 
@@ -399,33 +398,16 @@ npm run build              # 生产运行时构建
 
 ## 测试与覆盖率（Tests and Coverage）
 
-Go 运行时包含单元测试与集成测试。保留的 TypeScript 包也包含 Vitest 覆盖率测试和基于 Docker 的端到端测试。
+Go 运行时包含单元测试与集成测试。可选的 DeepSeek Harness 插件包含针对性 Vitest 测试。
 
 ```bash
 go test ./...
-npm run test:protocol
-npm run test:client
-npm run test:server
-npm run test --workspace=cli
 npm run test:plugin-dsh
-npm run test:server:coverage
-npm run test:coverage:full --workspace=server
 ```
-
-保留的 TypeScript 服务端覆盖率测试使用 Vitest 的 V8 覆盖率提供者（provider），并强制要求达到以下阈值：
-
-| 指标 | 阈值 |
-| --- | ---: |
-| 行覆盖率（Lines） | 98% |
-| 语句覆盖率（Statements） | 98% |
-| 函数覆盖率（Functions） | 97% |
-| 分支覆盖率（Branches） | 90% |
-
-`test:server:coverage` 会排除耗时较长的 `extreme` 与 `abnormal` 端到端（E2E）测试套件。当 Docker 与完整的集成测试环境可用时，请使用 `test:coverage:full`。HTML 与 JSON 格式的覆盖率报告会写入 `server/coverage/` 目录。
 
 ## 贡献指南（Contributing）
 
-欢迎提交 Bug 报告、功能建议、测试用例以及文档改进。请勿在提交（commit）中包含任何凭据（credential），在提交更改前运行相关的测试与构建命令，并确保协议（protocol）相关的变更在 `protocol/`、`cli/` 与 `server/` 之间保持同步。每次代码提交都必须包含相应的单元测试（unit test），且不得降低上文列出的任何覆盖率（coverage）指标。
+欢迎提交 Bug 报告、功能建议、测试用例以及文档改进。请勿在提交（commit）中包含任何凭据（credential），并在提交更改前运行相关的 Go 测试与构建命令。
 
 ## 许可证（License）
 

@@ -28,7 +28,7 @@
     }
   },
   "scripts": {
-    "build": "node ../scripts/inject-version.mjs && tsdown",
+    "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
@@ -53,12 +53,9 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
-    "@msgpack/msgpack": "^3.1.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@shellink/client": "0.2.4",
-    "@shellink/protocol": "0.2.4",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "0.1.1-rc.2",
     "@deepseek-ai/dsh-credentials": "0.1.1-rc.2",

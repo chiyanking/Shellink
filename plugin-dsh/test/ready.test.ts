@@ -1,27 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { RpcEvent } from '@shellink/protocol'
 import { SessionNotReadyError } from '../src/errors.js'
 import { awaitWaitingInput } from '../src/ready.js'
-import type { RpcClient, SessionStateResult } from '../src/types.js'
+import type { ShellinkClient, SessionStateResult } from '../src/types.js'
 
-function mockClient(states: SessionStateResult[]): RpcClient {
+function mockClient(states: SessionStateResult[]): ShellinkClient {
   let index = 0
-  const listeners: Array<(event: RpcEvent) => void> = []
   return {
     request: async (method) => {
       if (method !== 'sessions.state') throw new Error(method)
       const current = states[Math.min(index, states.length - 1)]!
       if (index < states.length - 1) index++
       return current
-    },
-    subscribe: async (_params, listener) => {
-      listeners.push(listener)
-      return {
-        subscriptionId: 'sub',
-        initial: {},
-        detach: () => undefined,
-        unsubscribe: async () => undefined,
-      }
     },
     close: () => undefined,
   }
@@ -76,50 +65,18 @@ describe('awaitWaitingInput', () => {
     })).rejects.toBeInstanceOf(SessionNotReadyError)
   })
 
-  it('wakes on a session.state event and ignores unrelated events', async () => {
-    let state: SessionStateResult = connecting
-    const client: RpcClient = {
-      request: async () => state,
-      subscribe: async (_params, listener) => {
-        queueMicrotask(() => {
-          listener({ subscriptionId: 'sub', event: 'session.output', data: {} })
-          state = waiting
-          listener({ subscriptionId: 'sub', event: 'session.state', data: { sessionId: 's1', state: 'WAITING_INPUT' } })
-        })
-        return {
-          subscriptionId: 'sub',
-          initial: {},
-          detach: () => undefined,
-          unsubscribe: async () => undefined,
-        }
-      },
-      close: () => undefined,
-    }
-    const result = await awaitWaitingInput({ client, sessionId: 's1', timeoutMs: 1000, pollMs: 200 })
-    expect(result.state).toBe('WAITING_INPUT')
-  })
-
-  it('ignores a subscriber readState failure and still becomes ready', async () => {
+  it('polls state until the session is ready', async () => {
     let calls = 0
-    const client: RpcClient = {
+    const client: ShellinkClient = {
       request: async () => {
         calls += 1
         if (calls === 1) return connecting
-        if (calls === 2) throw new Error('flaky')
         return waiting
-      },
-      subscribe: async (_params, listener) => {
-        listener({ subscriptionId: 'sub', event: 'session.state', data: {} })
-        return {
-          subscriptionId: 'sub',
-          initial: {},
-          detach: () => undefined,
-          unsubscribe: async () => undefined,
-        }
       },
       close: () => undefined,
     }
     const result = await awaitWaitingInput({ client, sessionId: 's1', timeoutMs: 1000, pollMs: 5 })
     expect(result.state).toBe('WAITING_INPUT')
+    expect(calls).toBe(2)
   })
 })

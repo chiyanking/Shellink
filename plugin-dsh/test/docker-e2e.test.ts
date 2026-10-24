@@ -3,25 +3,24 @@ import { connectExisting } from '../src/daemon.js'
 import { awaitWaitingInput } from '../src/ready.js'
 import { waitForDaemonJob } from '../src/jobs.js'
 import * as api from '../src/api.js'
-import { shellinkPaths } from '@shellink/client'
+import { resolveBaseUrl } from '../src/daemon.js'
 
 /**
  * Optional live-daemon smoke. Skipped unless SHELLINK_DOCKER_E2E=1 and a
- * daemon is already listening (start one with `shellink server start` after
- * `npm run test:docker:up` in server/ if you need SSH fixtures).
+ * daemon is already listening.
  *
  * Uses a local `command` profile so the path does not require Docker SSH.
  */
 describe.skipIf(process.env.SHELLINK_DOCKER_E2E !== '1')('live daemon open→exec→close', () => {
   it('opens a command session, execs, and closes', async () => {
-    const client = await connectExisting(shellinkPaths().socketPath, 1000)
+    const client = await connectExisting(resolveBaseUrl(), 1000)
     expect(client, 'expected a running shellink daemon').not.toBeNull()
     if (!client) return
 
     const profile = await api.createProfile(client, {
       name: `dsh-e2e-${Date.now()}`,
       connectType: 'command',
-      command: process.env.SHELL ?? '/bin/sh',
+      command: process.platform === 'win32' ? process.env.COMSPEC ?? 'cmd.exe' : process.env.SHELL ?? '/bin/sh',
     })
     try {
       const created = await api.createSession(client, profile.id)

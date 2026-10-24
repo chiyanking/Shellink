@@ -20,8 +20,6 @@ data/
 .agents/
 designs
 skills-lock.json
-server/src/generated/webAssets.ts
-protocol/src/generated/version.ts
 __pycache__/
 *.pyc
 *.pid

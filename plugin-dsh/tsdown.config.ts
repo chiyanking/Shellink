@@ -9,8 +9,4 @@ export default defineConfig({
   format: ['esm'],
   platform: 'node',
   fixedExtension: false,
-  deps: {
-    neverBundle: [/^@deepseek-ai\//, 'zod', '@msgpack/msgpack'],
-    alwaysBundle: ['@shellink/protocol', '@shellink/client'],
-  },
 })

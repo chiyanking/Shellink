@@ -1,6 +1,5 @@
-import type { RpcEvent } from '@shellink/protocol'
 import { SessionNotReadyError, notReadyMessage } from './errors.js'
-import type { InteractionMode, RpcClient, SessionState, SessionStateResult } from './types.js'
+import type { InteractionMode, ShellinkClient, SessionState, SessionStateResult } from './types.js'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -12,7 +11,7 @@ function isReady(state: SessionState, mode: InteractionMode): boolean {
 
 /** Wait until a session is AUTO + WAITING_INPUT, or throw an actionable error. */
 export async function awaitWaitingInput(options: {
-  client: RpcClient
+  client: ShellinkClient
   sessionId: string
   timeoutMs: number
   pollMs?: number
@@ -28,32 +27,16 @@ export async function awaitWaitingInput(options: {
 
   const deadline = Date.now() + timeoutMs
   let latest = initial
-  let settled: ((state: SessionStateResult) => void) | undefined
-  const sub = await client.subscribe({ sessionId }, (event: RpcEvent) => {
-    if (event.event !== 'session.state' && event.event !== 'session.mode' && event.event !== 'session.closed') return
-    void readState().then((state) => {
-      latest = state
-      settled?.(state)
-    }).catch(() => undefined)
-  })
-
-  try {
-    while (Date.now() < deadline) {
-      latest = await readState()
-      if (latest.mode === 'MANUAL' || latest.state === 'DISCONNECTED') {
-        throw new SessionNotReadyError(sessionId, latest.state, latest.mode, notReadyMessage(sessionId, latest.state, latest.mode))
-      }
-      if (isReady(latest.state, latest.mode)) return latest
-      const remaining = Math.max(0, deadline - Date.now())
-      await Promise.race([
-        sleep(Math.min(pollMs, remaining || pollMs)),
-        new Promise<void>((resolve) => {
-          settled = () => resolve()
-        }),
-      ])
+  while (true) {
+    if (latest.mode === 'MANUAL' || latest.state === 'DISCONNECTED') {
+      throw new SessionNotReadyError(sessionId, latest.state, latest.mode, notReadyMessage(sessionId, latest.state, latest.mode))
     }
-    throw new SessionNotReadyError(sessionId, latest.state, latest.mode, `${notReadyMessage(sessionId, latest.state, latest.mode)} Timed out after ${timeoutMs}ms.`)
-  } finally {
-    await sub.unsubscribe().catch(() => undefined)
+    if (isReady(latest.state, latest.mode)) return latest
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) {
+      throw new SessionNotReadyError(sessionId, latest.state, latest.mode, `${notReadyMessage(sessionId, latest.state, latest.mode)} Timed out after ${timeoutMs}ms.`)
+    }
+    await sleep(Math.min(pollMs, remaining))
+    latest = await readState()
   }
 }
