@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"unicode/utf16"
 	"unsafe"
 
@@ -185,17 +183,3 @@ type processExitError int
 
 func (e processExitError) Error() string { return fmt.Sprintf("process exited with code %d", int(e)) }
 func (e processExitError) ExitCode() int { return int(e) }
-
-func platformCommand(program string, args []string, env map[string]string, term string, cols, rows int) (*exec.Cmd, error) {
-	command := exec.Command(program, args...)
-	processEnv := map[string]string{"TERM": term, "COLUMNS": fmt.Sprint(cols), "LINES": fmt.Sprint(rows)}
-	for key, value := range env {
-		processEnv[key] = value
-	}
-	command.Env = environment(processEnv)
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	command.Dir, _ = os.UserHomeDir()
-	return command, nil
-}
-
-func resizePlatform(_ *exec.Cmd, _ int, _ int) error { return nil }
