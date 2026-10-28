@@ -82,7 +82,7 @@ func TestRuntimeRPCProfileAndCommandSession(t *testing.T) {
 	}
 	profile, err := connection.Request("profiles.create", protocol.JSONValue(map[string]any{
 		"name": "local-test", "connectType": "command",
-		"command": `printf 'shell$ '; while IFS= read -r line; do eval "$line"; printf 'shell$ '; done`,
+		"command": `stty -echo; printf 'shell$ '; while IFS= read -r line; do eval "$line"; printf 'shell$ '; done`,
 	}), time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -114,19 +114,35 @@ func TestRuntimeRPCProfileAndCommandSession(t *testing.T) {
 		return nil
 	}
 	waitFor("WAITING_INPUT")
-	result, err := connection.Request("sessions.exec", protocol.JSONValue(map[string]any{
-		"id": sessionID, "command": "printf 'go-runtime-ok'", "timeoutMs": 2000,
-	}), 4*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	output, _ := protocol.StringValue(protocol.MapValue(result)["output"])
-	if !strings.Contains(output, "go-runtime-ok") {
-		t.Fatalf("command output did not contain marker: %q", output)
-	}
-	state, err := connection.Request("sessions.state", protocol.JSONValue(map[string]any{"id": sessionID}), time.Second)
-	if err != nil || protocol.MapValue(state)["state"] != "WAITING_INPUT" {
-		t.Fatalf("unexpected session state after exec: %#v %v", state, err)
+	for _, command := range []struct {
+		name   string
+		text   string
+		output string
+	}{
+		{"immediate output", "printf 'go-runtime-ok'", "go-runtime-okshell$ "},
+		{"delayed output", "sleep 0.2; printf 'delayed-result'", "delayed-resultshell$ "},
+		{"no body output", "true", "shell$ "},
+	} {
+		t.Run(command.name, func(t *testing.T) {
+			result, err := connection.Request("sessions.exec", protocol.JSONValue(map[string]any{
+				"id": sessionID, "command": command.text, "timeoutMs": 2000,
+			}), 4*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fields := protocol.MapValue(result)
+			output, _ := protocol.StringValue(fields["output"])
+			if output != command.output {
+				t.Fatalf("command output = %q, want %q", output, command.output)
+			}
+			if fields["status"] != "DONE" || fields["timedOut"] != false {
+				t.Fatalf("unexpected exec result: %#v", result)
+			}
+			state, err := connection.Request("sessions.state", protocol.JSONValue(map[string]any{"id": sessionID}), time.Second)
+			if err != nil || protocol.MapValue(state)["state"] != "WAITING_INPUT" {
+				t.Fatalf("unexpected session state after exec: %#v %v", state, err)
+			}
+		})
 	}
 	_, err = connection.Request("sessions.close", protocol.JSONValue(map[string]any{"id": sessionID}), time.Second)
 	if err != nil {
