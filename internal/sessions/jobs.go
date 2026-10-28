@@ -116,7 +116,7 @@ func (m *Manager) ExecStart(sessionID, command string, timeoutMS int) (protocol.
 }
 
 func (m *Manager) runExec(jobID string, session *Session, command string, timeout time.Duration) {
-	state, _, _, active := session.Snapshot()
+	state, _, startSeq, active := session.Snapshot()
 	if !active || state == Disconnected {
 		m.settleJob(jobID, JobDisconnected, nil, nil)
 		m.releaseLock(session.ID)
@@ -131,7 +131,7 @@ func (m *Manager) runExec(jobID string, session *Session, command string, timeou
 		m.releaseLock(session.ID)
 		return
 	}
-	state, timedOut := session.WaitForStable(timeout, false)
+	state, timedOut := session.WaitForStableAfter(startSeq, timeout, false)
 	m.touchJobState(jobID, string(state))
 	if !timedOut {
 		m.settleJob(jobID, JobDone, &state, nil)
@@ -139,7 +139,7 @@ func (m *Manager) runExec(jobID string, session *Session, command string, timeou
 		return
 	}
 	m.settleJob(jobID, JobTimedOut, &state, nil)
-	state, _ = session.WaitForStable(24*time.Hour, false)
+	state, _ = session.WaitForStableAfter(startSeq, 24*time.Hour, false)
 	m.touchJobState(jobID, string(state))
 	if state == Disconnected {
 		m.settleJob(jobID, JobDisconnected, &state, nil)

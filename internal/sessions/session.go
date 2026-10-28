@@ -50,6 +50,7 @@ type Session struct {
 	state            State
 	mode             Mode
 	lastSeq          int64
+	lastOutputSeq    int64
 	closed           bool
 	internalDepth    int
 	loginPhase       bool
@@ -218,7 +219,10 @@ func (s *Session) EmitDisplayOutput(text string) {
 	s.bus.Publish(*event)
 }
 
-func (s *Session) WaitForStable(timeout time.Duration, acceptIdle bool) (State, bool) {
+// WaitForStableAfter ignores a prompt left over from before the command was sent.
+// Output may arrive and settle before this method is called, so compare sequence
+// numbers rather than requiring the caller to observe an intermediate state.
+func (s *Session) WaitForStableAfter(afterSeq int64, timeout time.Duration, acceptIdle bool) (State, bool) {
 	if timeout <= 0 {
 		timeout = time.Millisecond
 	}
@@ -227,9 +231,10 @@ func (s *Session) WaitForStable(timeout time.Duration, acceptIdle bool) (State, 
 	for {
 		s.mu.Lock()
 		state := s.state
+		hasOutput := s.lastOutputSeq > afterSeq
 		changed := s.stateChanged
 		s.mu.Unlock()
-		if state == Disconnected || state == WaitingInput || (acceptIdle && state == Idle) {
+		if state == Disconnected || (hasOutput && (state == WaitingInput || (acceptIdle && state == Idle))) {
 			return state, false
 		}
 		select {
@@ -267,6 +272,7 @@ func (s *Session) handleOutput(raw string) {
 	plain := StripANSI(raw)
 	s.appendRecentLocked(plain)
 	event := s.recordLocked("output", raw, plain)
+	s.lastOutputSeq = s.lastSeq
 	stateEvent := s.transitionLocked(Outputting)
 	if s.silenceTimer != nil {
 		s.silenceTimer.Stop()
