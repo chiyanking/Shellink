@@ -1,10 +1,4 @@
 
-服务器（UAT环境）
-    host: usm-cloud.sinochem.com
-    port: 60022
-    user:v-yegang1
-    password: a>VNvXSR6L/G
-
 ## 操作步骤（固定流程）
 
 ```bash
