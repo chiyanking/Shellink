@@ -25,3 +25,9 @@ __pycache__/
 *.pid
 *.sock
 master.key
+
+# local binary backups
+.backup/
+# build artifacts (delivered binary is not versioned)
+Shellink-Windows-x64/
+dist/

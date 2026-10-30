@@ -656,8 +656,10 @@ func renderHistoryWithoutInternal(chunks []store.HistoryChunk, newline string) s
 		}
 		flush()
 		if chunk.Direction == "input" {
-			// Mark user-typed commands so the audit trail is readable.
-			output.WriteString(newline + "❯ " + cleanInput(chunk.DataPlain))
+			// Mark user-typed commands so the audit trail is readable. The
+			// trailing newline is restored so the following program output
+			// starts on its own line instead of being glued to the command.
+			output.WriteString(newline + "❯ " + cleanInput(chunk.DataPlain) + newline)
 			continue
 		}
 		output.WriteString(chunk.DataRaw)
