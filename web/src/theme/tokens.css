@@ -517,8 +517,8 @@ h1, h2, h3, h4, p { margin: 0; }
 
 .history-block {
   background: var(--terminal-bg); border: 1px solid var(--terminal-line); border-radius: var(--radius-lg);
-  padding: 16px 18px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap;
-  word-break: break-all; color: var(--terminal-fg); max-height: calc(100vh - 220px); overflow: auto;
+  padding: 16px 18px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; white-space: pre;
+  color: var(--terminal-fg); max-height: calc(100vh - 220px); overflow: auto;
 }
 
 @media (max-width: 860px) {

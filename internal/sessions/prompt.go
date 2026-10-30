@@ -34,10 +34,27 @@ func colorizePrompts(text string) string {
 		return ""
 	}
 	text = dropControlSequences(text)
-	// Fold newlines exactly the way StripANSI does, so the coloured and the
-	// plain transcript are the same text with and without paint.
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "")
+	return tintPrompts(replayEdit(text))
+}
+
+// transcriptPlain is the no-colour twin of colorizePrompts: the same recording
+// reduced to the characters a reader actually saw, so a machine consumer and a
+// review pane always agree on the content.
+func transcriptPlain(text string) string {
+	return replayEdit(ansiPattern.ReplaceAllString(text, ""))
+}
+
+// ColorizeReplay prepares a raw recording for a one-shot terminal replay: the
+// screen noise is flattened exactly as the history view does, and prompts the
+// remote shell left uncoloured get the standard tint so a replayed session and
+// its live continuation look the same.
+func ColorizeReplay(text string) string {
+	return colorizePrompts(text)
+}
+
+// tintPrompts applies the prompt colours to a stream that no longer carries
+// non-SGR control sequences.
+func tintPrompts(text string) string {
 	text = shellPromptPattern.ReplaceAllStringFunc(text, tint)
 	return bracketPromptPattern.ReplaceAllStringFunc(text, tint)
 }
@@ -130,4 +147,113 @@ func hasColor(match string) bool {
 		}
 	}
 	return false
+}
+
+// replayEdit folds a recorded stream into the characters a reader would have
+// seen on screen. A carriage return rewinds to the start of the line so later
+// text replaces what came before it (progress bars, overtyped input), a
+// backspace or delete erases the character before it (the pty echoes every
+// editing keystroke), and the remaining control bytes — bell, Ctrl-C, flow
+// control — carry no text and vanish. Escape sequences must already be reduced
+// to SGR colour (dropControlSequences), which passes through untouched: the
+// coloured and the plain transcript both run through here, so they stay the
+// same text with and without paint.
+func replayEdit(text string) string {
+	if !strings.ContainsAny(text, "\x1b\r\b\x7f\x00\x01\x02\x03\x04\x05\x06\x07\x0b\x0c\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1c\x1d\x1e\x1f") {
+		return text
+	}
+	runes := []rune(text)
+	out := make([]rune, 0, len(runes))
+	for i := 0; i < len(runes); {
+		switch r := runes[i]; {
+		case r == '\x1b':
+			if end := matchSGR(runes[i:]); end > 0 {
+				out = append(out, runes[i:i+end]...)
+				i += end
+			} else {
+				i++ // a malformed or non-SGR escape has nothing to show
+			}
+		case r == '\r' && i+1 < len(runes) && runes[i+1] == '\n':
+			out = append(out, '\n')
+			i += 2
+		case r == '\n' || r == '\t':
+			out = append(out, r)
+			i++
+		case r == '\r':
+			out = rewindToLineStart(out)
+			i++
+		case r == '\b' || r == 0x7f:
+			out = eraseBefore(out)
+			i++
+		case r < 0x20:
+			i++ // bell, Ctrl-C and friends: no visible character
+		default:
+			out = append(out, r)
+			i++
+		}
+	}
+	return string(out)
+}
+
+// matchSGR reports how many runes at the front of the slice form a complete
+// SGR colour sequence; zero when they do not.
+func matchSGR(runes []rune) int {
+	if len(runes) < 3 || runes[1] != '[' {
+		return 0
+	}
+	j := 2
+	for j < len(runes) && (runes[j] == ';' || (runes[j] >= '0' && runes[j] <= '9')) {
+		j++
+	}
+	if j < len(runes) && runes[j] == 'm' {
+		return j + 1
+	}
+	return 0
+}
+
+// rewindToLineStart drops the current line, the way a terminal reuses it when
+// a carriage return arrives without a newline.
+func rewindToLineStart(out []rune) []rune {
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i] == '\n' {
+			return out[:i+1]
+		}
+	}
+	return out[:0]
+}
+
+// eraseBefore removes the last printed character. A run of SGR colour codes
+// at the end of the line belongs to the surrounding text, so it is lifted out
+// first and put back after the deletion. A backspace never crosses a line
+// boundary: erasing at column zero is a no-op on a real terminal, and letting
+// it eat the newline would weld two transcript lines together.
+func eraseBefore(out []rune) []rune {
+	end := len(out)
+	for {
+		start, ok := trailingSGR(out[:end])
+		if !ok {
+			break
+		}
+		end = start
+	}
+	if end == 0 || out[end-1] == '\n' {
+		return out
+	}
+	kept := out[:end-1]
+	return append(kept, out[end:]...)
+}
+
+// trailingSGR reports whether the slice ends with a complete SGR sequence and
+// where that sequence starts.
+func trailingSGR(out []rune) (int, bool) {
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i] != '\x1b' {
+			continue
+		}
+		if end := matchSGR(out[i:]); end > 0 && i+end == len(out) {
+			return i, true
+		}
+		return 0, false
+	}
+	return 0, false
 }

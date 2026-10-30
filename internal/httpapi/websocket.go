@@ -35,7 +35,10 @@ func (s *Server) terminalWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 	sessionID := r.PathValue("id")
 	replay, _ := s.sessions.RawHistory(sessionID, 512*1024, false)
-	_ = conn.send(map[string]any{"type": "replay", "data": replay})
+	// The replay is a static dump: flatten the screen noise the way the
+	// history view does and give the past prompts the same colours the live
+	// stream is about to get.
+	_ = conn.send(map[string]any{"type": "replay", "data": sessions.ColorizeReplay(replay)})
 	state := map[string]any{"state": string(sessions.Disconnected), "mode": string(sessions.Auto)}
 	if value, err := s.sessions.State(sessionID); err == nil {
 		for key, field := range protocol.MapValue(value) {
@@ -46,6 +49,7 @@ func (s *Server) terminalWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	var eventMu sync.Mutex
 	hidingInternal := false
+	tinter := sessions.NewLiveTinter()
 	unsubscribe := s.bus.Subscribe(func(event sessions.Event) {
 		fields := protocol.MapValue(event.Data)
 		id, _ := protocol.StringValue(fields["sessionId"])
@@ -77,7 +81,7 @@ func (s *Server) terminalWebSocket(w http.ResponseWriter, r *http.Request) {
 				_ = conn.send(map[string]any{"type": "data", "data": "\r\n[shellink] transfer output hidden\r\n"})
 			}
 			raw, _ := protocol.StringValue(fields["raw"])
-			_ = conn.send(map[string]any{"type": "data", "data": raw})
+			_ = conn.send(map[string]any{"type": "data", "data": tinter.Filter(raw)})
 		case "session.state":
 			value, _ := protocol.StringValue(fields["state"])
 			_ = conn.send(map[string]any{"type": "state", "state": value})

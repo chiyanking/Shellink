@@ -59,11 +59,38 @@ writeFileSync(
   { encoding: 'utf8' }
 )
 
-run('powershell', [
-  '-NoProfile',
-  '-Command',
-  `Compress-Archive -Path '${staging}' -DestinationPath '${zip}' -CompressionLevel Optimal -Force`,
-])
+// Compress-Archive silently skips a file it cannot read — a binary written
+// moments ago is often still held by the antivirus scanner — which once
+// shipped an archive without shellink.exe. So verify the archive really
+// carries both executables, and rebuild it once if the scanner was slow.
+function zipHasBothExecutables() {
+  const result = spawnSync('powershell', [
+    '-NoProfile',
+    '-Command',
+    `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
+      `$z = [IO.Compression.ZipFile]::OpenRead('${zip}'); ` +
+      `$n = $z.Entries.Count; ` +
+      `$c = @($z.Entries | Where-Object { $_.Name -eq 'shellink.exe' }).Count; ` +
+      `$z.Dispose(); Write-Output "entries=$n core=$c"`,
+  ], { encoding: 'utf8' })
+  const match = /entries=(\d+) core=(\d+)/.exec(result.stdout || '')
+  return match !== null && Number(match[1]) >= 4 && Number(match[2]) >= 1
+}
+
+for (let attempt = 1; ; attempt++) {
+  run('powershell', [
+    '-NoProfile',
+    '-Command',
+    `Compress-Archive -Path '${staging}' -DestinationPath '${zip}' -CompressionLevel Optimal -Force`,
+  ])
+  if (existsSync(zip) && zipHasBothExecutables()) break
+  if (attempt >= 3) {
+    console.error('压缩包缺少 shellink.exe 或 启动器.exe，重试后仍失败，请手动检查杀毒软件占用。')
+    process.exit(1)
+  }
+  console.log(`压缩包不完整（第 ${attempt} 次），等待 1 秒后重试...`)
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, false, 1000)
+}
 
 console.log(`\n打包完成: ${zip}  (${(statSync(zip).size / 1024 / 1024).toFixed(1)} MB)`)
 console.log('把整个 shellink 文件夹或 zip 发给别人即可，解压到任意目录、双击“Shellink启动器.exe”运行。')

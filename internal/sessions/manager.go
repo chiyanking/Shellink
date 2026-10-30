@@ -360,7 +360,7 @@ func (m *Manager) History(id string, since int64, limit int, includeInternal, co
 	if color {
 		return protocol.Object("cursor", cursor, "text", colorizePrompts(text)), nil
 	}
-	return protocol.Object("cursor", cursor, "text", StripANSI(text)), nil
+	return protocol.Object("cursor", cursor, "text", transcriptPlain(text)), nil
 }
 
 func (m *Manager) RawHistory(id string, maxBytes int, includeInternal bool) (string, error) {
