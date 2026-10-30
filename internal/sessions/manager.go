@@ -639,33 +639,89 @@ func profileTarget(profile store.Profile) string {
 	return fmt.Sprintf("%s@%s:%d", profile.Username, profile.Host, profile.Port)
 }
 
+// renderHistoryWithoutInternal rebuilds a readable transcript from the recorded
+// chunk stream while keeping the original terminal formatting.
+//
+// Program output is emitted verbatim: the remote shell already echoes what the
+// user types, so replaying the output stream reproduces the session exactly as
+// it looked live (prompt, command, result). Typing is recorded per keystroke,
+// so an input chunk must NOT be turned into its own line — that would split
+// "ls" into "l" and "s" on separate lines.
+//
+// An input chunk is therefore only rendered explicitly (prefixed with "❯ ")
+// when the output that follows does not echo it. That happens for shell exec
+// jobs, where the command is written to the session without a terminal echo,
+// and for input hidden from the terminal (password prompts).
 func renderHistoryWithoutInternal(chunks []store.HistoryChunk, newline string) string {
 	var output strings.Builder
+	var pending strings.Builder
 	hidden := 0
-	flush := func() {
+
+	flushHidden := func() {
 		if hidden == 0 {
 			return
 		}
 		fmt.Fprintf(&output, "%s[shellink] hidden %d internal transfer output chunks%s", newline, hidden, newline)
 		hidden = 0
 	}
+	flushPending := func() {
+		if pending.Len() == 0 {
+			return
+		}
+		line := cleanInput(pending.String())
+		pending.Reset()
+		if line == "" {
+			return
+		}
+		output.WriteString(newline + "❯ " + line + newline)
+	}
+
 	for _, chunk := range chunks {
 		if chunk.Internal {
 			hidden++
 			continue
 		}
-		flush()
+		flushHidden()
 		if chunk.Direction == "input" {
-			// Mark user-typed commands so the audit trail is readable. The
-			// trailing newline is restored so the following program output
-			// starts on its own line instead of being glued to the command.
-			output.WriteString(newline + "❯ " + cleanInput(chunk.DataPlain) + newline)
+			// Collect typed bytes; whether they need to be rendered depends on
+			// whether the shell echoes them back.
+			pending.WriteString(chunk.DataRaw)
 			continue
+		}
+		if pending.Len() > 0 {
+			typed := cleanInput(pending.String())
+			echo := strings.TrimSpace(chunk.DataPlain)
+			switch {
+			case typed == "":
+				// Only control keys (Enter, arrows, ...) were typed; the echoed
+				// output already carries whatever they produced.
+				pending.Reset()
+			case echo == "":
+				// Control-only output (cursor moves, mode switches): keep
+				// collecting until there is enough output to decide.
+			case isEchoOf(typed, echo):
+				// The shell echoed it, so it is already in the output.
+				pending.Reset()
+			default:
+				flushPending()
+			}
 		}
 		output.WriteString(chunk.DataRaw)
 	}
-	flush()
+	flushHidden()
+	flushPending()
 	return output.String()
+}
+
+// isEchoOf reports whether the program output starts with the terminal echo of
+// the typed text (or the other way round, when the echo is still partial).
+func isEchoOf(typed, output string) bool {
+	t := strings.TrimSpace(typed)
+	o := strings.TrimSpace(output)
+	if t == "" || o == "" {
+		return false
+	}
+	return strings.HasPrefix(o, t) || strings.HasPrefix(t, o)
 }
 
 // cleanInput normalises a recorded user input string for display in the
