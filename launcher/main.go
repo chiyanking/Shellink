@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,12 +28,31 @@ func main() {
 	}
 	dir := filepath.Dir(exePath)
 	core := filepath.Join(dir, "shellink.exe")
+
+	// "--check" answers "will this folder run on this machine?" without starting
+	// anything: whatever was unpacked here may lack the SSH client, may sit on a
+	// Windows release without ConPTY, or may live in a folder that cannot be
+	// written. Exit code is the number of missing pieces, so the check is usable
+	// from a script as well.
+	for _, arg := range os.Args[1:] {
+		switch strings.ToLower(strings.TrimLeft(arg, "-/")) {
+		case "check", "env", "doctor":
+			if failures := printEnvReport(dir); failures > 0 {
+				os.Exit(failures)
+			}
+			return
+		}
+	}
+
 	if _, err := os.Stat(core); err != nil {
 		fmt.Println("未找到 shellink.exe，请将其与本启动器放在同一目录下。")
 		fmt.Println("目录:", dir)
 		pause()
 		return
 	}
+
+	// Only the problems are reported here; a healthy start stays quiet.
+	printEnvWarnings(dir)
 
 	// Shellink keeps one daemon per data directory and always binds the same
 	// port, so a daemon left over from a previous run guarantees a failed
@@ -209,75 +227,33 @@ func joinPIDs(pids []int) string {
 func printSelfCheck(dir string) {
 	fmt.Println()
 	fmt.Println("---- 自检 ----")
-	// "Cannot write the data directory" has two very different causes: the
-	// folder itself is locked, or this process may not write the user profile
-	// at all (low integrity token). Probing %TEMP% tells them apart.
-	tempBlocked := false
-	if probe, err := os.CreateTemp("", "shellink-write-*"); err != nil {
-		tempBlocked = true
-		fmt.Println("进程写权限: 连临时目录都写不了 → 程序文件夹被标成了「低完整性(Low)」")
-	} else {
-		name := probe.Name()
-		_ = probe.Close()
-		_ = os.Remove(name)
-		fmt.Println("进程写权限: 可以写临时目录 ✓")
-	}
+	// The shared checks already cover the data directory, the port, disk space
+	// and the process integrity. The two lines below only make sense for a
+	// start that has just failed.
+	printChecks(collectChecks(dir))
 	home := dataHome()
-	fmt.Println("数据目录:", home)
-	if home == "" {
-		fmt.Println("  无法确定: APPDATA / SHELLINK_HOME 都是空的")
-	} else if err := os.MkdirAll(home, 0700); err != nil {
-		fmt.Println("  创建失败:", err)
-	} else if probe, err := os.CreateTemp(home, ".probe-*"); err != nil {
-		fmt.Println("  不可写:", err)
-	} else {
-		name := probe.Name()
-		_ = probe.Close()
-		_ = os.Remove(name)
-		fmt.Println("  可写 ✓")
-	}
 	if home != "" {
 		logPath := filepath.Join(home, "shellink.log")
 		if file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600); err != nil {
-			fmt.Printf("日志文件: %s\n  打不开: %v\n", logPath, err)
+			fmt.Println("! " + padLabel("日志文件:", 12) + logPath)
+			fmt.Println("    → 打不开:", err)
 		} else {
 			_ = file.Close()
-			fmt.Printf("日志文件: %s 可写 ✓\n", logPath)
+			fmt.Println("✓ " + padLabel("日志文件:", 12) + logPath + " 可写")
 		}
 	}
-	if listener, err := net.Listen("tcp", "127.0.0.1:7070"); err != nil {
-		fmt.Println("端口 7070: 已被占用 (", err, ")")
-	} else {
-		_ = listener.Close()
-		fmt.Println("端口 7070: 空闲 ✓")
-	}
 	if pids := runningShellink(); len(pids) > 0 {
-		fmt.Println("残留进程: PID", joinPIDs(pids))
+		fmt.Println("! " + padLabel("残留进程:", 12) + "PID " + joinPIDs(pids))
 	} else {
-		fmt.Println("残留进程: 无 ✓")
+		fmt.Println("✓ " + padLabel("残留进程:", 12) + "无")
 	}
-	if tempBlocked {
+	if lowIntegrityProcess() {
 		fmt.Println()
 		fmt.Println("修复办法（任选其一，然后重新双击本启动器）:")
 		fmt.Printf("  1) 重置文件夹完整性标签: icacls \"%s\" /setintegritylevel (OI)(CI)Medium /T\n", dir)
 		fmt.Println("  2) 把整个文件夹复制到普通目录（例如 E:\\Shellink）再运行")
 	}
 	fmt.Println("--------------")
-}
-
-// dataHome mirrors the preference order used by the daemon so the self-check
-// names the directory that the start actually tried to use.
-func dataHome() string {
-	if explicit := strings.TrimSpace(os.Getenv("SHELLINK_HOME")); explicit != "" {
-		return explicit
-	}
-	if base := os.Getenv("APPDATA"); base != "" {
-		return filepath.Join(base, "Shellink")
-	}
-	if base, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(base, "Shellink")
-	}
-	return ""
 }
 
 // writeDiagnostics drops everything a failed start knows into one file, so the
