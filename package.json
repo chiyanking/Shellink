@@ -36,6 +36,7 @@
     "build:binary:windows-arm64": "node scripts/build-go.mjs --target windows arm64",
     "build:binary:windows-x64": "node scripts/build-go.mjs --target windows amd64",
     "build:binary:all": "node scripts/build-go.mjs --all",
+    "package:windows": "node scripts/package-windows.mjs",
     "start": "go run ./cmd/shellink server run"
   }
 }
