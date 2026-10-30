@@ -74,7 +74,11 @@ async function createSession() {
 
 async function closeSession(id: string) {
   try {
-    await api(`/sessions/${id}`, { method: 'DELETE' })
+    // NOTE: closing a session must keep its record so it shows up under
+    // "recently ended sessions" and remains auditable. The DELETE
+    // /sessions/{id} endpoint permanently removes the record, so we use the
+    // dedicated close endpoint (sessions.close) which only disconnects it.
+    await api(`/sessions/${id}/close`, { method: 'POST', body: {} })
     await sessionsStore.refresh()
   } catch (e) {
     message.error((e as Error).message)

@@ -89,7 +89,9 @@ async function switchMode(manual: boolean) {
 
 async function closeSession() {
   try {
-    await api(`/sessions/${props.sessionId}`, { method: 'DELETE' })
+    // Closing must keep the session record (for audit / recently-ended list),
+    // not delete it. Use the dedicated close endpoint, not DELETE /sessions/{id}.
+    await api(`/sessions/${props.sessionId}/close`, { method: 'POST', body: {} })
     message.success(t('session.closed'))
   } catch (e) {
     message.error((e as Error).message)
