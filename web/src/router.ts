@@ -7,6 +7,7 @@ export const router = createRouter({
     { path: '/', component: () => import('./views/DashboardView.vue') },
     { path: '/profiles', component: () => import('./views/ProfilesView.vue') },
     { path: '/webhook-messages', component: () => import('./views/WebhookMessagesView.vue') },
+    { path: '/mcp', component: () => import('./views/McpView.vue') },
     { path: '/sessions/:id', component: () => import('./views/SessionView.vue') },
     { path: '/sessions/:id/history', component: () => import('./views/HistoryView.vue') },
   ],

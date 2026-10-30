@@ -26,6 +26,7 @@ const showCreate = ref(false)
 const selectedProfile = ref<string | null>(null)
 const creating = ref(false)
 const purging = ref(false)
+const stopping = ref(false)
 const hasToken = ref(!!getToken())
 /** From server policy: whether delete/purge needs a token. Safe default until loaded. */
 const requireTokenForDelete = ref(true)
@@ -115,6 +116,20 @@ async function purgeClosedRecords(olderThan: PurgeScope) {
   }
 }
 
+// Shuts the whole Shellink daemon down so the user never has to run
+// "shellink.exe server stop" in a terminal.
+async function stopService() {
+  stopping.value = true
+  try {
+    await api('/server/stop', { method: 'POST', body: '{}' })
+    message.success(t('server.stopping'))
+  } catch (error) {
+    message.error((error as Error).message)
+  } finally {
+    stopping.value = false
+  }
+}
+
 async function copySessionId(id: string) {
   try {
     await navigator.clipboard.writeText(id)
@@ -164,7 +179,15 @@ onMounted(async () => {
         <h1>{{ t('dashboard.title') }}</h1>
         <div class="sub">{{ t('app.dashSub') }}</div>
       </div>
-      <NButton type="primary" @click="showCreate = true">{{ t('dashboard.newSession') }}</NButton>
+      <NSpace align="center">
+        <NPopconfirm @positive-click="stopService">
+          <template #trigger>
+            <NButton type="error" ghost :loading="stopping">{{ t('server.stop') }}</NButton>
+          </template>
+          {{ t('server.stopConfirm') }}
+        </NPopconfirm>
+        <NButton type="primary" @click="showCreate = true">{{ t('dashboard.newSession') }}</NButton>
+      </NSpace>
     </div>
 
     <div class="section-heading">

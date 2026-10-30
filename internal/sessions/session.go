@@ -26,6 +26,28 @@ const (
 
 const defaultPromptPattern = `[$#>%](\s|\x{00a0})*$`
 
+// maxAutoPasswordAttempts bounds how many times Shellink will automatically send
+// the stored password in response to a password prompt before giving up. This
+// prevents an infinite loop when the configured password is wrong.
+const maxAutoPasswordAttempts = 3
+
+// passwordPromptRe matches the SSH password prompt printed to the PTY so Shellink
+// can auto-fill it (used instead of SSH_ASKPASS, which deadlocks under ConPTY on
+// Windows).
+var passwordPromptRe = regexp.MustCompile(`(?i)password\s*:`)
+
+// authFailureRe matches output that means the connection or login attempt has
+// definitively failed. When it appears the login phase is abandoned immediately
+// so the session stops reporting CONNECTING and surfaces the error to the UI
+// instead of hanging in "connecting" forever.
+var authFailureRe = regexp.MustCompile(`(?i)(permission denied|authentication failed|access denied|connection refused|connection timed out|connection closed by|host key verification failed|could not resolve hostname|no route to host|network is unreachable|too many authentication failures)`)
+
+// defaultLoginTimeout is how long Shellink waits for a login phase to complete
+// before giving up on it. Without this a session whose prompt never matches the
+// configured prompt regex (custom shells, non-interactive commands, unusual
+// banners) would stay in CONNECTING forever, which looks like a hung connection.
+const defaultLoginTimeout = 30 * time.Second
+
 type SessionOptions struct {
 	ID          string
 	ProfileID   string
@@ -35,6 +57,12 @@ type SessionOptions struct {
 	Rows        int
 	PromptRegex *string
 	SilenceMS   int
+	// LoginPhase controls whether the session starts in the login phase. Command
+	// sessions have nothing to log into, so they skip it.
+	LoginPhase *bool
+	// LoginTimeoutMS bounds how long the login phase may last. <=0 uses
+	// defaultLoginTimeout.
+	LoginTimeoutMS int
 }
 
 type Session struct {
@@ -46,22 +74,25 @@ type Session struct {
 	Cols        int
 	Rows        int
 
-	mu               sync.Mutex
-	state            State
-	mode             Mode
-	lastSeq          int64
-	lastOutputSeq    int64
-	closed           bool
-	internalDepth    int
-	loginPhase       bool
-	recentPlain      string
-	recentPublic     string
-	prompt           *regexp.Regexp
-	silenceThreshold time.Duration
-	silenceTimer     *time.Timer
-	stateChanged     chan struct{}
-	transport        Transport
-	bus              *Bus
+	mu                   sync.Mutex
+	state                State
+	mode                 Mode
+	lastSeq              int64
+	lastOutputSeq        int64
+	closed               bool
+	internalDepth        int
+	loginPhase           bool
+	autoPassword         string
+	autoPasswordAttempts int
+	recentPlain          string
+	recentPublic         string
+	prompt               *regexp.Regexp
+	silenceThreshold     time.Duration
+	silenceTimer         *time.Timer
+	loginDeadline        time.Time
+	stateChanged         chan struct{}
+	transport            Transport
+	bus                  *Bus
 }
 
 func NewSession(opts SessionOptions, bus *Bus) (*Session, error) {
@@ -73,11 +104,20 @@ func NewSession(opts SessionOptions, bus *Bus) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	loginPhase := true
+	if opts.LoginPhase != nil {
+		loginPhase = *opts.LoginPhase
+	}
+	loginTimeout := defaultLoginTimeout
+	if opts.LoginTimeoutMS > 0 {
+		loginTimeout = time.Duration(opts.LoginTimeoutMS) * time.Millisecond
+	}
 	return &Session{
 		ID: opts.ID, ProfileID: opts.ProfileID, ProfileName: opts.ProfileName, Term: opts.Term,
 		Cols: opts.Cols, Rows: opts.Rows, CreatedAt: time.Now().UnixMilli(),
-		state: Connecting, mode: Auto, loginPhase: true, prompt: prompt,
+		state: Connecting, mode: Auto, loginPhase: loginPhase, prompt: prompt,
 		silenceThreshold: time.Duration(opts.SilenceMS) * time.Millisecond,
+		loginDeadline:    time.Now().Add(loginTimeout),
 		stateChanged:     make(chan struct{}), bus: bus,
 	}, nil
 }
@@ -88,6 +128,13 @@ func (s *Session) Attach(transport Transport) {
 	s.mu.Unlock()
 	log.Printf("[Shellink] session=%s event=transport-attached", s.ID)
 	go func() {
+		// Safety net: the silence timer only fires after output arrives, so a
+		// session that never produces output would stay in the login phase (and
+		// therefore in CONNECTING) forever. End the login phase on a deadline.
+		if deadline, ok := s.loginDeadlineOnce(); ok {
+			timer := time.AfterFunc(time.Until(deadline), s.endLoginPhase)
+			defer timer.Stop()
+		}
 		for output := range transport.Output() {
 			s.handleOutput(output)
 		}
@@ -278,11 +325,30 @@ func (s *Session) handleOutput(raw string) {
 		s.silenceTimer.Stop()
 	}
 	s.silenceTimer = time.AfterFunc(s.silenceThreshold, s.evaluateSilence)
+	// Auto-fill the password prompt through the PTY when running in AUTO mode
+	// during the login phase. This replaces the SSH_ASKPASS mechanism, which
+	// deadlocks under ConPTY on Windows.
+	autoPassword := ""
+	shouldSend := false
+	if s.mode == Auto && s.loginPhase && s.autoPassword != "" && s.autoPasswordAttempts < maxAutoPasswordAttempts {
+		if passwordPromptRe.MatchString(plain) {
+			autoPassword = s.autoPassword
+			shouldSend = true
+			s.autoPasswordAttempts++
+		}
+	}
 	s.mu.Unlock()
 	log.Printf("[Shellink] session=%s event=output bytes=%d internal=%t kind=%s", s.ID, len(raw), internal, outputDiagnosticKind(plain))
 	s.bus.Publish(*event)
 	if stateEvent != nil {
 		s.bus.Publish(*stateEvent)
+	}
+	if shouldSend {
+		if err := s.Write(autoPassword+"\n", false); err != nil {
+			log.Printf("[Shellink] session=%s event=auto-password-write-error err=%v", s.ID, err)
+		} else {
+			log.Printf("[Shellink] session=%s event=auto-password-sent attempt=%d", s.ID, s.autoPasswordAttempts)
+		}
 	}
 }
 
@@ -301,6 +367,43 @@ func (s *Session) recordLocked(direction, raw, plain string) *Event {
 	)}
 }
 
+// loginDeadlineOnce reports the login-phase deadline for sessions that start in
+// the login phase.
+func (s *Session) loginDeadlineOnce() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.loginPhase {
+		return time.Time{}, false
+	}
+	return s.loginDeadline, true
+}
+
+// endLoginPhase aborts the login phase so the session leaves CONNECTING even if
+// no output ever arrived (for example a host that silently drops the connection).
+func (s *Session) endLoginPhase() {
+	s.mu.Lock()
+	if !s.loginPhase {
+		s.mu.Unlock()
+		return
+	}
+	s.loginPhase = false
+	next := Idle
+	if s.prompt.MatchString(lastLine(s.recentPlain)) {
+		next = WaitingInput
+	}
+	event := s.transitionLocked(next)
+	s.mu.Unlock()
+	log.Printf("[Shellink] session=%s event=login-phase-timeout next=%s", s.ID, next)
+	if event != nil {
+		s.bus.Publish(*event)
+	}
+}
+
+func lastLine(text string) string {
+	lines := strings.Split(text, "\n")
+	return lines[len(lines)-1]
+}
+
 func (s *Session) evaluateSilence() {
 	s.mu.Lock()
 	if s.closed {
@@ -310,12 +413,27 @@ func (s *Session) evaluateSilence() {
 	lines := strings.Split(s.recentPlain, "\n")
 	lastLine := lines[len(lines)-1]
 	atPrompt := s.prompt.MatchString(lastLine)
+	authFailed := authFailureRe.MatchString(s.recentPlain)
+	loginExpired := time.Now().After(s.loginDeadline)
 	next := Idle
 	if s.loginPhase {
-		if atPrompt {
+		switch {
+		case atPrompt:
+			// Reached a shell prompt: login finished and the remote is waiting
+			// for a command.
 			s.loginPhase = false
 			next = WaitingInput
-		} else {
+		case authFailed:
+			// The credentials were rejected (or the host refused us). Stop
+			// pretending we are still connecting so the UI can show the error.
+			s.loginPhase = false
+			next = Idle
+		case loginExpired:
+			// Give up on the login phase: the prompt never matched. Fall back to
+			// IDLE so the session becomes usable instead of hanging in CONNECTING.
+			s.loginPhase = false
+			next = Idle
+		default:
 			next = Connecting
 		}
 	} else if atPrompt {
@@ -324,7 +442,7 @@ func (s *Session) evaluateSilence() {
 	loginPhase := s.loginPhase
 	event := s.transitionLocked(next)
 	s.mu.Unlock()
-	log.Printf("[Shellink] session=%s event=silence login_phase=%t prompt_match=%t next=%s", s.ID, loginPhase, atPrompt, next)
+	log.Printf("[Shellink] session=%s event=silence login_phase=%t prompt_match=%t auth_failed=%t login_expired=%t next=%s", s.ID, loginPhase, atPrompt, authFailed, loginExpired, next)
 	if event != nil {
 		s.bus.Publish(*event)
 	}
@@ -354,6 +472,8 @@ func (s *Session) handleClose(reason string, exitCode *int) {
 		return
 	}
 	s.closed = true
+	// The channel is gone, so there is nothing left to log into.
+	s.loginPhase = false
 	if s.silenceTimer != nil {
 		s.silenceTimer.Stop()
 	}

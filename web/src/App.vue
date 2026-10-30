@@ -71,12 +71,14 @@ const navItems = computed(() => [
   { key: '/', label: t('app.dashboard'), icon: 'grid' as const },
   { key: '/profiles', label: t('app.profiles'), icon: 'server' as const },
   { key: '/webhook-messages', label: t('app.webhookMessages'), icon: 'webhook' as const },
+  { key: '/mcp', label: t('app.mcp'), icon: 'mcp' as const },
 ])
 
 const activeKey = computed(() => {
   if (route.path.startsWith('/sessions')) return '/'
   if (route.path.startsWith('/profiles')) return '/profiles'
   if (route.path.startsWith('/webhook-messages')) return '/webhook-messages'
+  if (route.path.startsWith('/mcp')) return '/mcp'
   return route.path
 })
 
@@ -86,6 +88,9 @@ const pageMeta = computed(() => {
   }
   if (route.path.startsWith('/webhook-messages')) {
     return { title: t('app.webhookMessages'), subtitle: '' }
+  }
+  if (route.path.startsWith('/mcp')) {
+    return { title: t('app.mcp'), subtitle: t('app.mcpSub') }
   }
   if (route.path.includes('/history')) {
     return { title: t('history.title'), subtitle: '' }
@@ -150,6 +155,12 @@ function isNavActive(key: string) {
                   <rect x="3" y="13" width="18" height="7" rx="1.5" />
                   <circle cx="7" cy="7.5" r="0.9" fill="currentColor" stroke="none" />
                   <circle cx="7" cy="16.5" r="0.9" fill="currentColor" stroke="none" />
+                </svg>
+                <svg v-else-if="item.icon === 'mcp'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <path d="M8 10h8" />
+                  <path d="M8 14h5" />
+                  <circle cx="17.5" cy="14" r="1.2" fill="currentColor" stroke="none" />
                 </svg>
                 <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M9 17a4 4 0 1 1 3.4-6.2" />

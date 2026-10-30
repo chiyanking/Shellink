@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-//go:embed assets
+//go:embed all:assets
 var embeddedUI embed.FS
 
 func embeddedUIAssets() (http.Handler, bool) {

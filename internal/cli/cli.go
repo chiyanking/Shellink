@@ -109,6 +109,9 @@ func Main(args []string) error {
 	if group == "cli" {
 		return runInteractive(cfg)
 	}
+	if group == "mcp" {
+		return handleMCP(cfg, flags)
+	}
 	if group != "profile" && group != "session" && group != "webhook" {
 		return fmt.Errorf("unknown command: %s", group)
 	}
@@ -467,5 +470,5 @@ func help(topic string) string {
 	if topic == "server" {
 		return "Usage: shellink server start|status|stop|restart|logs|run\n"
 	}
-	return fmt.Sprintf("Shellink %s\n\nUsage: shellink <command> [options]\n\nCommands:\n  cli          Interactive session console\n  server       Manage the daemon\n  profile      Manage connection profiles\n  session      Manage terminal sessions\n  webhook      Manage event callbacks\n  agent-doc    Print AI agent documentation\n  version      Print version information\n  upgrade      Upgrade a release binary\n\nUse shellink <command> --help for details.\n", rpc.Version)
+	return fmt.Sprintf("Shellink %s\n\nUsage: shellink <command> [options]\n\nCommands:\n  cli          Interactive session console\n  server       Manage the daemon\n  profile      Manage connection profiles\n  session      Manage terminal sessions\n  webhook      Manage event callbacks\n  mcp          Expose Shellink over the Model Context Protocol (stdio)\n  agent-doc    Print AI agent documentation\n  version      Print version information\n  upgrade      Upgrade a release binary\n\nUse shellink <command> --help for details.\n", rpc.Version)
 }

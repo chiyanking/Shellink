@@ -99,16 +99,24 @@ func (m *Manager) Create(profileID string, cols, rows int) (protocol.Value, erro
 	if err != nil {
 		return nil, service.Internal(err)
 	}
+	// Command sessions run a local program: there is no login handshake to wait
+	// for, so they must not start in the login phase (otherwise they would be
+	// pinned to CONNECTING because no shell prompt ever appears).
+	loginPhase := profile.ConnectType != "command"
 	session, err := NewSession(SessionOptions{
 		ID: id, ProfileID: profile.ID, ProfileName: profile.Name, Term: profile.Term,
 		Cols: cols, Rows: rows, PromptRegex: profile.PromptRegex, SilenceMS: m.cfg.SilenceThresholdMS,
+		LoginPhase: &loginPhase, LoginTimeoutMS: m.cfg.SSHReadyTimeoutMS,
 	}, m.bus)
 	if err != nil {
 		return nil, service.Invalid("Invalid promptRegex: " + err.Error())
 	}
-	program, args, env, keyPath, err := m.sessionCommand(profile, id)
+	program, args, env, keyPath, password, err := m.sessionCommand(profile, id)
 	if err != nil {
 		return nil, service.Internal(err)
+	}
+	if password != "" {
+		session.autoPassword = password
 	}
 	transport, err := NewProcessTransport(program, args, env, profile.Term, cols, rows)
 	if err != nil {
@@ -150,7 +158,7 @@ func (m *Manager) Create(profileID string, cols, rows int) (protocol.Value, erro
 	return protocol.Object("id", id, "state", string(Connecting), "mode", string(Auto), "target", profileTarget(profile)), nil
 }
 
-func (m *Manager) sessionCommand(profile store.Profile, sessionID string) (string, []string, map[string]string, string, error) {
+func (m *Manager) sessionCommand(profile store.Profile, sessionID string) (string, []string, map[string]string, string, string, error) {
 	if profile.ConnectType == "command" {
 		command := ""
 		if profile.Command != nil {
@@ -161,43 +169,53 @@ func (m *Manager) sessionCommand(profile store.Profile, sessionID string) (strin
 			if shell == "" {
 				shell = "cmd.exe"
 			}
-			return shell, []string{"/D", "/S", "/C", command}, nil, "", nil
+			return shell, []string{"/D", "/S", "/C", command}, nil, "", "", nil
 		}
-		return "/bin/sh", []string{"-lc", command}, nil, "", nil
+		return "/bin/sh", []string{"-lc", command}, nil, "", "", nil
 	}
 	ssh, err := exec.LookPath("ssh")
 	if err != nil && runtime.GOOS == "windows" {
 		ssh, err = exec.LookPath("ssh.exe")
 	}
 	if err != nil {
-		return "", nil, nil, "", fmt.Errorf("OpenSSH client was not found in PATH")
+		return "", nil, nil, "", "", fmt.Errorf("OpenSSH client was not found in PATH")
 	}
 	args := []string{
 		"-tt", "-p", fmt.Sprint(profile.Port),
 		"-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=40",
 		"-o", fmt.Sprintf("ConnectTimeout=%d", max(1, m.cfg.SSHReadyTimeoutMS/1000)),
+		// Accept new host keys automatically so a first connection does not hang
+		// on the "Are you sure you want to continue connecting?" prompt.
+		"-o", "StrictHostKeyChecking=accept-new",
 	}
 	env := map[string]string{}
 	keyPath := ""
+	password := ""
 	if profile.EncryptedPrivateKey != nil {
 		privateKey, decryptErr := m.box.Decrypt(*profile.EncryptedPrivateKey)
 		if decryptErr != nil {
-			return "", nil, nil, "", fmt.Errorf("decrypt profile key: %w", decryptErr)
+			return "", nil, nil, "", "", fmt.Errorf("decrypt profile key: %w", decryptErr)
 		}
 		keyPath = filepath.Join(m.cfg.DataHome, ".shellink-key-"+sessionID)
 		if err := os.WriteFile(keyPath, []byte(privateKey), 0600); err != nil {
-			return "", nil, nil, "", fmt.Errorf("write temporary SSH key: %w", err)
+			return "", nil, nil, "", "", fmt.Errorf("write temporary SSH key: %w", err)
 		}
 		args = append(args, "-i", keyPath, "-o", "IdentitiesOnly=yes")
 	}
 	if profile.EncryptedPassword != nil {
-		password, decryptErr := m.box.Decrypt(*profile.EncryptedPassword)
+		decrypted, decryptErr := m.box.Decrypt(*profile.EncryptedPassword)
 		if decryptErr != nil {
 			if keyPath != "" {
 				_ = os.Remove(keyPath)
 			}
-			return "", nil, nil, "", fmt.Errorf("decrypt profile password: %w", decryptErr)
+			return "", nil, nil, "", "", fmt.Errorf("decrypt profile password: %w", decryptErr)
 		}
+		password = decrypted
+		// Hand the password to ssh through SSH_ASKPASS. This is the mechanism
+		// OpenSSH uses when stdin is not a terminal, which is exactly the case
+		// for Shellink's pipe based transport on Windows. (Under ConPTY the
+		// askpass child inherits the pseudo console and its output never reaches
+		// ssh, which is why ConPTY is no longer the default on Windows.)
 		executable, _ := os.Executable()
 		env["SHELLINK_ASKPASS_SECRET"] = password
 		env["SHELLINK_SESSION_ID"] = sessionID
@@ -213,7 +231,7 @@ func (m *Manager) sessionCommand(profile store.Profile, sessionID string) (strin
 		host = "[" + host + "]"
 	}
 	args = append(args, profile.Username+"@"+host)
-	return ssh, args, env, keyPath, nil
+	return ssh, args, env, keyPath, password, nil
 }
 
 func (m *Manager) Get(id string) *Session {
@@ -274,8 +292,34 @@ func (m *Manager) State(id string) (protocol.Value, error) {
 	if err != nil {
 		return nil, service.Internal(err)
 	}
+	// Once a session ends it leaves the live map, but the UI still reads its
+	// state. Return the tail of the transcript so the terminal view does not go
+	// blank the moment a session disconnects.
+	recent := m.recentOutputFromHistory(id)
 	return protocol.Object("id", id, "state", string(Disconnected), "mode", record.Mode,
-		"closeReason", record.CloseReason, "exitCode", record.ExitCode, "active", false), nil
+		"closeReason", record.CloseReason, "exitCode", record.ExitCode, "active", false,
+		"recentOutput", recent), nil
+}
+
+// recentOutputFromHistory rebuilds the last lines of output for a session that
+// is no longer live.
+func (m *Manager) recentOutputFromHistory(id string) string {
+	m.flushHistory()
+	chunks, err := m.db.History(id, 0, 200)
+	if err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, chunk := range chunks {
+		if chunk.Direction == "output" {
+			sb.WriteString(chunk.DataPlain)
+		}
+	}
+	lines := strings.Split(sb.String(), "\n")
+	if len(lines) > 15 {
+		lines = lines[len(lines)-15:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Manager) History(id string, since int64, limit int, includeInternal bool) (protocol.Value, error) {
