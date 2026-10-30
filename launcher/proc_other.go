@@ -10,3 +10,7 @@ func runningShellink() []int { return nil }
 func alive(pid int) bool { return false }
 
 func forceKill(pid int) {}
+
+func isElevated() bool { return false }
+
+func elevatedBrowser() bool { return false }

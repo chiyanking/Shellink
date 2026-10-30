@@ -97,7 +97,20 @@ func main() {
 	fmt.Println("Shellink 已启动 ✓")
 	time.Sleep(800 * time.Millisecond)
 	if os.Getenv("SHELLINK_NO_BROWSER") == "" {
-		openBrowser(url)
+		// A browser running with administrator rights rejects a URL from a
+		// process that has less: Edge answers "现有实例正在以提升的权限运行"
+		// and offers to restart itself. The launcher can match an elevated
+		// browser (it inherits this process's rights), but it cannot reach a
+		// higher one, so say what to do instead of making a modal dialog pop up.
+		if !isElevated() && elevatedBrowser() {
+			fmt.Println()
+			fmt.Println("提示: 现有浏览器以管理员权限运行，普通权限的启动器无法把页面交给它")
+			fmt.Println("      （Edge 会弹“现有实例正在以提升的权限运行”，选“是”会把浏览器关掉重开）。")
+			fmt.Println("      请先关闭这些浏览器窗口，或重启一次浏览器后再打开下面的地址。")
+			fmt.Println("      地址:", url)
+		} else {
+			openBrowser(url)
+		}
 	}
 
 	fmt.Println()
@@ -143,6 +156,12 @@ func stopExisting(core, dir string) {
 		return
 	}
 	fmt.Printf("  警告: 仍有进程未退出 (PID %s)，启动可能失败。\n", joinPIDs(aliveOf(pids)))
+	if !isElevated() {
+		// An elevated daemon cannot be killed by a normal process, and taskkill
+		// has no way to report that usefully, so name the reason here.
+		fmt.Println("  提示: 该进程以管理员权限运行，普通窗口无法结束它 —— 请在任务管理器中结束，")
+		fmt.Println("        或先关闭所有 Shellink 窗口再重新启动本程序。")
+	}
 }
 
 func runQuiet(core, dir string, args ...string) {
@@ -347,7 +366,25 @@ func hintFor(message string) string {
 	return ""
 }
 
+// openBrowser shows the web console.
+//
+// Which request actually reaches the browser depends on privileges: Edge refuses
+// a URL from a process with less rights ("现有实例正在以提升的权限运行" and a
+// prompt to restart the browser), while a request with the same rights is
+// accepted. So the launch must match whatever is already running:
+//
+//   - an elevated browser is already open → inherit (rundll32), which is
+//     exactly what an elevated process produces and what Edge accepts;
+//   - an elevated launcher with no browser open → hand the URL to the desktop
+//     shell (explorer.exe), so the browser is not started elevated in the first
+//     place, which is what poisons every later request;
+//   - otherwise → inherit (rundll32), the ordinary case.
 func openBrowser(url string) {
+	if isElevated() && !elevatedBrowser() {
+		if err := exec.Command("explorer.exe", url).Start(); err == nil {
+			return
+		}
+	}
 	c := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	_ = c.Start()
 }
