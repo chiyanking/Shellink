@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-//go:embed assets
+// Vite emits shared chunks such as _plugin-vue_export-helper-*.js. Include
+// underscore-prefixed files, which directory embeds omit by default.
+//
+//go:embed all:assets
 var embeddedUI embed.FS
 
 func embeddedUIAssets() (http.Handler, bool) {
