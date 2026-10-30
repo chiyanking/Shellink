@@ -59,7 +59,7 @@ const messages = {
     dashboard: {
       title: '会话仪表盘', newSession: '新建会话', activeSessions: '活跃会话', noActive: '暂无活跃会话',
       recentSessions: '最近结束的会话', noRecords: '暂无记录', active: '活动', disconnected: '已断开',
-      copy: '点击复制', mode: '模式', alive: '存活', duration: '持续', startedAt: '开始',
+      copy: '点击复制', mode: '模式', alive: '存活', duration: '持续', startedAt: '开始', endedAt: '最后',
       closeConfirm: '确认关闭该会话？',
       deleteConfirm: '将关闭并彻底删除该会话及历史记录，确认？', profileSearch: '输入关键词筛选连接配置',
       deleteNeedsToken: '删除会话需要先设置 Token', deleted: '会话已删除', copied: '已复制会话 ID：{id}',
@@ -121,7 +121,7 @@ const messages = {
     dashboard: {
       title: 'Session Dashboard', newSession: 'New session', activeSessions: 'Active sessions', noActive: 'No active sessions',
       recentSessions: 'Recently closed sessions', noRecords: 'No records', active: 'Active', disconnected: 'Disconnected',
-      copy: 'Copy', mode: 'Mode', alive: 'Uptime', duration: 'Duration', startedAt: 'Started',
+      copy: 'Copy', mode: 'Mode', alive: 'Uptime', duration: 'Duration', startedAt: 'Started', endedAt: 'Last seen',
       closeConfirm: 'Close this session?',
       deleteConfirm: 'Close and permanently delete this session and its history?', profileSearch: 'Filter connection profiles',
       deleteNeedsToken: 'Set a token before deleting a session', deleted: 'Session deleted', copied: 'Copied session ID: {id}',

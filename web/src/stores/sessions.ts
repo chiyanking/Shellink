@@ -2,6 +2,11 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { api, wsUrl, type SessionSummary } from '../api'
 
+/** When a session stopped being live: its close time, or its start time if unknown. */
+function sessionEndedAt(s: SessionSummary): number {
+  return s.closedAt ?? s.createdAt
+}
+
 /** Global session list + active count, kept fresh via a single /events WebSocket. */
 export const useSessionsStore = defineStore('sessions', () => {
   const sessions = ref<SessionSummary[]>([])
@@ -12,8 +17,16 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   const activeCount = computed(() => sessions.value.filter((s) => s.active).length)
   const activeSessions = computed(() => sessions.value.filter((s) => s.active))
+  // Newest first: "recently closed" must list the most recent session on top.
+  // The API already returns active-first/newest-first, but sorting explicitly
+  // keeps the order correct for cached or out-of-order responses and does not
+  // depend on the server ordering.
   const closedSessions = computed(() =>
-    sessions.value.filter((s) => !s.active).slice(-20).reverse(),
+    sessions.value
+      .filter((s) => !s.active)
+      .slice()
+      .sort((a, b) => sessionEndedAt(b) - sessionEndedAt(a))
+      .slice(0, 20),
   )
 
   function stateOf(id: string): string | undefined {

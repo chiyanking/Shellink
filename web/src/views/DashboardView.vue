@@ -310,6 +310,7 @@ onMounted(async () => {
             @click.stop="copySessionId(s.id)"
           >{{ s.id }}</span>
           <span>{{ t('dashboard.startedAt') }} {{ formatStartedAt(s.createdAt) }}</span>
+          <span>{{ t('dashboard.endedAt') }} {{ formatStartedAt(s.closedAt ?? s.createdAt) }}</span>
           <span>{{ t('dashboard.duration') }} {{ uptime(s) }}</span>
           <span v-if="s.closeReason">· {{ s.closeReason }}</span>
         </div>
