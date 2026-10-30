@@ -246,7 +246,14 @@ func (s *Server) sessionHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	include := query.Get("includeInternal") == "1" || strings.EqualFold(query.Get("includeInternal"), "true")
-	s.dispatch(w, "sessions.history", map[string]any{"id": r.PathValue("id"), "since": since, "limit": limit, "includeInternal": include})
+	color := query.Get("color") == "1" || strings.EqualFold(query.Get("color"), "true")
+	s.dispatch(w, "sessions.history", map[string]any{
+		"id":              r.PathValue("id"),
+		"since":           since,
+		"limit":           limit,
+		"includeInternal": include,
+		"color":           color,
+	})
 }
 
 func (s *Server) sessionInput(w http.ResponseWriter, r *http.Request) {

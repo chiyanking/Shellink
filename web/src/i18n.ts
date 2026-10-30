@@ -89,7 +89,7 @@ const messages = {
       downloaded: '已下载 {filename}（{size} 字节）', uploaded: '已上传到 {path}（{size} 字节）',
       closedTerminal: '[会话已断开: {reason}]',
     },
-    history: { title: '会话历史审查', empty: '（暂无输出记录）' },
+    history: { title: '会话历史审查', empty: '（暂无输出记录）', color: '颜色' },
     webhookMessages: {
       title: 'Webhook 消息', callbackUrl: '回调地址', empty: '暂未收到 Webhook 消息',
       receivedAt: '接收时间', copied: '回调地址已复制', copyFailed: '复制失败', clear: '清空',
@@ -151,7 +151,7 @@ const messages = {
       downloaded: 'Downloaded {filename} ({size} bytes)', uploaded: 'Uploaded to {path} ({size} bytes)',
       closedTerminal: '[Session closed: {reason}]',
     },
-    history: { title: 'Session History', empty: '(No output recorded)' },
+    history: { title: 'Session History', empty: '(No output recorded)', color: 'Color' },
     webhookMessages: {
       title: 'Webhook Messages', callbackUrl: 'Callback URL', empty: 'No webhook messages received',
       receivedAt: 'Received', copied: 'Callback URL copied', copyFailed: 'Copy failed', clear: 'Clear',

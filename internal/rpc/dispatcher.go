@@ -170,7 +170,17 @@ func (d *Dispatcher) Dispatch(method string, params protocol.Value, sink EventSi
 				return nil, service.Invalid("includeInternal must be a boolean")
 			}
 		}
-		return d.sessions.History(id, since, int(limit), include)
+		// Off unless asked for: a machine consumer must not have escape
+		// sequences mixed into the transcript it is trying to parse.
+		color := false
+		if raw, present := fields["color"]; present {
+			var valid bool
+			color, valid = protocol.BoolValue(raw)
+			if !valid {
+				return nil, service.Invalid("color must be a boolean")
+			}
+		}
+		return d.sessions.History(id, since, int(limit), include, color)
 	case "sessions.input":
 		id, err := requiredString(fields, "id")
 		if err != nil {

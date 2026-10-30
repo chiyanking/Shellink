@@ -45,6 +45,13 @@ SL="$(command -v shellink || echo "$HOME/Desktop/tool/shellink-cli/shellink")"
 表格放不下的列会被收起，并在末尾提示 `… N more columns · use --json for everything`，
 即完整数据只在 `--json` 里。
 
+### 会话历史的颜色
+
+`session history` 与网页端「历史审查」页会还原远端 shell 自己产生的 ANSI 颜色，
+并记录下来的提示符（`user@host:/path#`）— 身份绿、路径蓝、root 的 `#` 黄，
+便于一眼分辨“我在哪台机器”与“这是程序输出还是命令”。
+脚本/AI 消费时加 `--json`（或请求不带 `color`），拿到的仍是无转义的纯文本。
+
 ## 任何 Shellink 任务的第一步
 
 先读安装的命令参考——它是权威文档，可能比本 skill 更新：

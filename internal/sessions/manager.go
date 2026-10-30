@@ -322,7 +322,14 @@ func (m *Manager) recentOutputFromHistory(id string) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Manager) History(id string, since int64, limit int, includeInternal bool) (protocol.Value, error) {
+// History replays a session as text.
+//
+// The transcript is a raw terminal stream, so it carries the colours the remote
+// shell emitted. `color` decides who gets to keep them: a person reading it in
+// a terminal or in the web console does, while a machine consumer — MCP, an
+// agent, a log file — asks for the plain text it can actually parse. Both come
+// from the same recording; nothing is re-rendered or lost either way.
+func (m *Manager) History(id string, since int64, limit int, includeInternal, color bool) (protocol.Value, error) {
 	if _, err := m.db.Session(id); errors.Is(err, store.ErrNotFound) {
 		return nil, service.NotFound("Session not found")
 	} else if err != nil {
@@ -349,6 +356,9 @@ func (m *Manager) History(id string, since int64, limit int, includeInternal boo
 		text = sb.String()
 	} else {
 		text = renderHistoryWithoutInternal(chunks, "\n")
+	}
+	if color {
+		return protocol.Object("cursor", cursor, "text", colorizePrompts(text)), nil
 	}
 	return protocol.Object("cursor", cursor, "text", StripANSI(text)), nil
 }

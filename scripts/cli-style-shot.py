@@ -8,12 +8,14 @@ result. Nothing is simulated: every line in the picture came out of the binary.
 from __future__ import annotations
 
 import html
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +29,10 @@ PROMPT_DIR = r"E:\Desktop\Shellink-Windows-x64\Shellink-Windows-x64"
 # scale into the window size as well halves the layout width.
 VIEW_W = 1240
 SCALE = 2
+# A port of our own so the daemon under test never races the one the user is
+# already running on :7070.
+SPARE_PORT = 7171
+MAX_LINES = 46
 COMMANDS = [
     ["version"],
     ["server", "status"],
@@ -139,16 +145,58 @@ def to_html(raw: str) -> str:
     return "".join(out)
 
 
+def ensureDaemon() -> None:
+    """Bring up a throwaway daemon on a spare port.
+
+    Whatever the user is running stays untouched: a second port and its own
+    data directory keep this probe from binding :7070 or writing into the data
+    home the real daemon owns — the first version of this script did both, and
+    the daemon answered "address already in use" for every command.
+    """
+    result = subprocess.run(
+        [str(EXE), "server", "status"],
+        cwd=str(DAEMON_DIR),
+        env=env(),
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return
+    subprocess.run(
+        [str(EXE), "server", "start"],
+        cwd=str(DAEMON_DIR),
+        env=env(),
+        capture_output=True,
+        check=True,
+    )
+    for _ in range(40):
+        time.sleep(0.25)
+        probe = subprocess.run(
+            [str(EXE), "server", "status"],
+            cwd=str(DAEMON_DIR),
+            env=env(),
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            return
+    raise SystemExit("daemon did not come up on the spare port")
+
+
+def env() -> dict[str, str]:
+    prepared = dict(os.environ)
+    prepared["SHELLINK_COLOR"] = "always"
+    prepared["COLUMNS"] = "118"
+    prepared["SHELLINK_PORT"] = str(SPARE_PORT)
+    prepared["SHELLINK_HOME"] = str(DAEMON_DIR / "shellink-data")
+    prepared.pop("NO_COLOR", None)
+    return prepared
+
+
 def run(args: list[str]) -> str:
-    env = dict(os.environ)
-    env["SHELLINK_COLOR"] = "always"
-    env["COLUMNS"] = "118"
-    env["SHELLINK_HOME"] = r"E:\Desktop\Shellink-Windows-x64\Shellink-Windows-x64\shellink-data"
-    env.pop("NO_COLOR", None)
+    prepared = env()
     result = subprocess.run(
         [str(EXE)] + args,
         cwd=str(DAEMON_DIR),
-        env=env,
+        env=prepared,
         capture_output=True,
     )
     text = result.stdout.decode("utf-8", "replace")
@@ -157,9 +205,50 @@ def run(args: list[str]) -> str:
     return text.rstrip("\r\n")
 
 
+def shorten(text: str) -> str:
+    """Keep a screenshot readable when a transcript runs long."""
+    lines = text.splitlines()
+    if len(lines) <= MAX_LINES:
+        return text
+    kept = lines[:MAX_LINES]
+    return "\n".join(kept + [f"… {len(lines) - MAX_LINES} more lines · raise --limit to see more"])
+
+
+def firstSession() -> str:
+    """The id of any session on this daemon, so the transcript has content."""
+    probe = subprocess.run(
+        [str(EXE), "session", "list", "--json"],
+        cwd=str(DAEMON_DIR),
+        env=env(),
+        capture_output=True,
+    )
+    try:
+        rows = json.loads(probe.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+        return str(rows[0].get("id") or "")
+    return ""
+
+
+def planned() -> list[list[str]]:
+    """The commands to photograph, with history last.
+
+    History is the whole point of the colouring work, so it goes at the bottom
+    where the eye ends up — and it is truncated, because a real transcript is
+    far longer than any screenshot should be.
+    """
+    commands = [list(item) for item in COMMANDS]
+    sid = firstSession()
+    if sid:
+        commands.append(["session", "history", sid, "--limit", "400"])
+    return commands
+
+
 def render() -> str:
+    ensureDaemon()
     blocks: list[str] = []
-    for args in COMMANDS:
+    for args in planned():
         label = " ".join(args)
         blocks.append(
             '<div class="cmd">'
@@ -169,7 +258,7 @@ def render() -> str:
             f'<span class="args">{html.escape(label)}</span>'
             "</div>"
         )
-        blocks.append(f'<pre class="out">{to_html(run(args))}</pre>')
+        blocks.append(f'<pre class="out">{to_html(shorten(run(args)))}</pre>')
     return "\n".join(blocks)
 
 
@@ -263,6 +352,9 @@ def main() -> None:
     try:
         page = work / "page.html"
         page.write_text(PAGE.format(content=render()), encoding="utf-8")
+        # Keep the markup next to the picture: reading the inline styles is
+        # the only way to check the colours survived all the way through.
+        OUT.with_suffix(".html").write_text(page.read_text(encoding="utf-8"), encoding="utf-8")
         OUT.parent.mkdir(parents=True, exist_ok=True)
         chrome = browser()
         probe = subprocess.run(

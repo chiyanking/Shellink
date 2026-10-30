@@ -306,7 +306,17 @@ func handleRPC(connection *client.Client, words []string, flags map[string]strin
 		if err != nil {
 			return err
 		}
-		return requestOnlyError(request("sessions.history", map[string]any{"id": sid, "since": since, "limit": limit, "includeInternal": flagBool(flags, "include-internal")}, 0))
+		// Ask the daemon for the colours it recorded only when this stdout can
+		// actually show them; otherwise the transcript would arrive full of
+		// escape sequences that render as garbage in a file or a pipe, and
+		// --json in particular must stay parseable.
+		return requestOnlyError(request("sessions.history", map[string]any{
+			"id":              sid,
+			"since":           since,
+			"limit":           limit,
+			"includeInternal": flagBool(flags, "include-internal"),
+			"color":           useColor() && !flagBool(flags, "json"),
+		}, 0))
 	case "input":
 		return requestOnlyError(request("sessions.input", map[string]any{"id": sid, "text": required(flags["text"], "--text"), "appendNewline": !flagBool(flags, "no-newline")}, 0))
 	case "exec":

@@ -21,6 +21,8 @@ The GitHub Release body is generated from the matching section in this file
 - Human readable command output: results print as aligned tables and key/value rows in the terminal instead of indented JSON. States (`WAITING_INPUT`, `DISCONNECTED`), `MANUAL`/`AUTO`, booleans, URLs and sizes carry their own colors, command output prints as an untouched block under its key, and overflowing tables say how many columns were left out rather than hiding them.
 - `--color auto|always|never` for the human readable output, alongside the existing `NO_COLOR` handling. Sequences are never written when stdout is a pipe or a file.
 - Per-command help pages (`shellink help session`, `server`, `profile`, `webhook`, `mcp`, `upgrade`) with usage, copyable examples and notes, plus a root page listing every command, the global options and examples.
+- Colored session history: the web console history view renders the ANSI colors the remote shell emitted instead of showing the transcript as plain text. `sessions.history` takes an optional `color` flag so machine consumers keep receiving stripped text.
+- Shell prompts are tinted in review output: `user@host` in green, the working directory in blue, and `#` in yellow for root so a privileged prompt is not mistaken for a normal one. Prompts the remote shell already colored are left alone.
 
 ### Changed
 
