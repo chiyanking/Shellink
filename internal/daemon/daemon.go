@@ -62,19 +62,36 @@ func startDetached(cfg config.Config) error { return startDetachedPlatform(cfg) 
 // handle, a read-only data directory) only produces an opaque "Access is
 // denied" with no way forward. Logging to the temp directory keeps the app
 // usable and `server logs` still has something to show.
+//
+// A daemon that was stopped a moment ago can still hold the handle for a few
+// hundred milliseconds, therefore the open is retried briefly before giving up:
+// that transient sharing violation used to surface as a failed start right
+// after the user pressed "stop".
 func prepareLogWithFallback(path string) (*os.File, error) {
-	file, err := prepareLog(path)
-	if err == nil {
-		return file, nil
+	var firstErr error
+	for attempt := 0; attempt < 4; attempt++ {
+		file, err := prepareLog(path)
+		if err == nil {
+			return file, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
 	}
 	fallback := filepath.Join(os.TempDir(), "shellink.log")
-	if filepath.Clean(fallback) == filepath.Clean(path) {
-		return nil, err
+	if filepath.Clean(fallback) != filepath.Clean(path) {
+		if alternative, altErr := prepareLog(fallback); altErr == nil {
+			fmt.Fprintf(os.Stderr, "Shellink: log file %s is not writable (%v), writing to %s\n", path, firstErr, fallback)
+			return alternative, nil
+		}
 	}
-	if alternative, altErr := prepareLog(fallback); altErr == nil {
-		return alternative, nil
+	// Last resort: start without a log file instead of refusing to start.
+	if discard, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0); err == nil {
+		fmt.Fprintf(os.Stderr, "Shellink: log file %s is not writable (%v), logging disabled\n", path, firstErr)
+		return discard, nil
 	}
-	return nil, err
+	return nil, firstErr
 }
 
 func prepareLog(path string) (*os.File, error) {
