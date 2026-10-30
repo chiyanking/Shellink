@@ -255,7 +255,7 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 				setSessionCursor(manual, sessionState)
 			case "session.closed":
 				reason, _ := protocol.StringValue(data["reason"])
-				fmt.Fprintf(os.Stdout, "\r\n[shellink] session closed: %s\r\n", reason)
+				fmt.Fprintf(os.Stdout, "\r\n%s session closed: %s\r\n", gray("[shellink]"), red(reason))
 			}
 		case data, ok := <-input:
 			if !ok || data == nil {
@@ -266,7 +266,7 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 			}
 			if !manual && bytes.Equal(data, []byte("m")) {
 				if _, err := connection.Request("sessions.mode", protocol.JSONValue(map[string]any{"id": sessionID, "mode": "MANUAL"}), 5*time.Second); err != nil {
-					fmt.Fprintf(os.Stdout, "\r\n[shellink] %v\r\n", err)
+					fmt.Fprintf(os.Stdout, "\r\n%s %s\r\n", gray("[shellink]"), failSymbol()+" "+red(err.Error()))
 				} else {
 					manual, tookControl = true, true
 					drawSessionStatus(sessionID, manual, dimensions)
@@ -285,7 +285,7 @@ func runSessionTerminal(connection *client.Client, input <-chan []byte, resizePo
 			if manual {
 				_, err := connection.Request("sessions.input", protocol.JSONValue(map[string]any{"id": sessionID, "text": string(data), "appendNewline": false, "manual": true}), 5*time.Second)
 				if err != nil {
-					fmt.Fprintf(os.Stdout, "\r\n[shellink] %v\r\n", err)
+					fmt.Fprintf(os.Stdout, "\r\n%s %s\r\n", gray("[shellink]"), failSymbol()+" "+red(err.Error()))
 				}
 			}
 		}
@@ -303,10 +303,26 @@ func resizeSession(connection *client.Client, id string, dimensions terminalDime
 	return err
 }
 
+// drawSessionStatus keeps a one-line bar at the bottom of the screen. The
+// session id and the mode are the two things worth a color there: "MANUAL"
+// means a human has the terminal and nothing automatic will get through.
 func drawSessionStatus(sessionID string, manual bool, dimensions terminalDimensions) {
 	cols, rows := max(1, dimensions.cols), max(1, dimensions.rows)
-	status := fmt.Sprintf("[shellink] session %s | %s | Esc return | m take control", sessionID, modeLabel(manual))
-	fmt.Fprintf(os.Stdout, "\x1b[s\x1b[%d;1H\x1b[2K%s\x1b[u", rows, padRightVisible(status, max(0, cols-1)))
+	mode := cyan("AUTO") + gray(" (read only)")
+	if manual {
+		mode = modeText("MANUAL")
+	}
+	status := strings.Join([]string{
+		gray("[shellink]"),
+		gray("session"),
+		cyan(sessionID),
+		gray("\u2502"),
+		mode,
+		gray("\u2502"),
+		cyan("Esc") + " " + gray("return"),
+		cyan("m") + " " + gray("take control"),
+	}, " ")
+	fmt.Fprintf(os.Stdout, "\x1b[s\x1b[%d;1H\x1b[2K%s\x1b[u", rows, padRightAnsi(status, max(0, cols-1)))
 }
 
 func setSessionCursor(manual bool, state string) {
@@ -315,13 +331,6 @@ func setSessionCursor(manual bool, state string) {
 		return
 	}
 	fmt.Fprint(os.Stdout, "\x1b[?25l")
-}
-
-func modeLabel(manual bool) string {
-	if manual {
-		return "MANUAL"
-	}
-	return "AUTO (read only)"
 }
 
 func isSessionReturnKey(data []byte) bool {
@@ -350,37 +359,42 @@ func drawDashboard(size terminalDimensions, view string, items []map[string]any,
 			active++
 		}
 	}
-	title := "Shellink | 1 Sessions | 2 Profiles"
+	// Every field a real day needs, and each one in the color that says what it
+	// is: green when it is alive, purple when a human holds it, gray when it is
+	// gone. Nothing here changes the layout, only what the eye catches first.
+	title := strongText("Shellink") + dim("  \u2502  ") + tabLabel(view, "sessions", "1 Sessions") + dim(" \u2502 ") + tabLabel(view, "profiles", "2 Profiles")
 	if view == "profiles" {
-		title = "Shellink | 1 Sessions | 2 Profiles"
+		title = strongText("Shellink") + dim("  \u2502  ") + tabLabel(view, "sessions", "1 Sessions") + dim(" \u2502 ") + tabLabel(view, "profiles", "2 Profiles")
 	}
-	lines = append(lines, padRightVisible(title, cols))
+	lines = append(lines, title)
 	if view == "sessions" {
-		lines = append(lines, padRightVisible(fmt.Sprintf("Sessions: %d active, %d total", active, len(items)), cols))
+		count, suffix := green(fmt.Sprint(active)), gray(" active, ")+strongText(fmt.Sprint(len(items)))+gray(" total")
+		lines = append(lines, fmt.Sprintf("Sessions: %s%s", count, suffix))
 	} else {
-		lines = append(lines, padRightVisible(fmt.Sprintf("Connection profiles: %d", len(items)), cols))
+		lines = append(lines, fmt.Sprintf("Connection profiles: %s", strongText(fmt.Sprint(len(items)))))
 	}
 	if searching {
-		lines = append(lines, padRightVisible("Search /"+query, cols))
+		lines = append(lines, dim("Search ")+cyan("/"+query))
 	} else if query != "" {
-		lines = append(lines, padRightVisible("Filter: "+query, cols))
+		lines = append(lines, gray("Filter: ")+cyan(query))
 	} else {
 		lines = append(lines, "")
 	}
 	if message != "" {
-		lines = append(lines, padRightVisible(message, cols))
+		lines = append(lines, warnSymbol()+" "+yellow(message))
 	}
 	if help {
 		escapeHint := "Esc quit"
 		if view == "profiles" {
 			escapeHint = "Esc back"
 		}
-		lines = append(lines, fmt.Sprintf("j/k or arrows move   Enter open   1/2 switch   %s   / search   r refresh", escapeHint))
+		lines = append(lines, dim(fmt.Sprintf("%s  %s  %s  %s  %s  %s",
+			keyHint("j/k", "or arrows move"), keyHint("Enter", "open"), keyHint("1/2", "switch"), escapeHint, keyHint("/", "search"), keyHint("r", "refresh"))))
 	} else if len(items) == 0 {
 		if view == "sessions" {
-			lines = append(lines, "No sessions. Press 2 to select a connection profile.")
+			lines = append(lines, gray("No sessions. ")+cyan("2")+gray(" selects a connection profile."))
 		} else {
-			lines = append(lines, "No connection profiles. Create one with `shellink profile create`.")
+			lines = append(lines, gray("No connection profiles. Create one with ")+cyan("shellink profile create")+gray("."))
 		}
 	} else {
 		start := max(0, selected-rows+8)
@@ -393,29 +407,33 @@ func drawDashboard(size terminalDimensions, view string, items []map[string]any,
 			item := items[i]
 			marker := "  "
 			if i == selected {
-				marker = "> "
+				marker = cyan(symbolPointer + " ")
 			}
 			var row string
 			if view == "sessions" {
-				status, mode := "", ""
+				// Pad first, color after: an escape sequence counts as length in
+				// a "%-10s" and would push the next column out of line.
+				state, mode := gray(padRightVisible("DISCONNECTED", 14)), padRightVisible("", 7)
 				if item["active"] == true {
-					status, _ = item["state"].(string)
-					mode, _ = item["mode"].(string)
-				} else {
-					status = "DISCONNECTED"
+					state = stateText(padRightVisible(displayValue(item["state"]), 14))
+					mode = modeText(padRightVisible(displayValue(item["mode"]), 7))
 				}
-				row = fmt.Sprintf("%s%-10s %-14s %-7s %-18s %s", marker, displayValue(item["id"]), status, mode, displayValue(item["profileName"]), displayValue(item["target"]))
+				id := cyan(padRightVisible(displayValue(item["id"]), 10))
+				name := strongText(padRightVisible(displayValue(item["profileName"]), 18))
+				row = fmt.Sprintf("%s%s %s %s %s %s", marker, id, state, mode, name, dim(displayValue(item["target"])))
 			} else {
-				row = fmt.Sprintf("%s%-24s %-8s %s", marker, displayValue(item["name"]), strings.ToUpper(displayValue(item["connectType"])), displayValue(item["host"]))
+				name := strongText(padRightVisible(displayValue(item["name"]), 24))
+				kind := blue(padRightVisible(strings.ToUpper(displayValue(item["connectType"])), 8))
+				row = fmt.Sprintf("%s%s %s %s", marker, name, kind, displayValue(item["host"]))
 			}
-			lines = append(lines, padRightVisible(row, cols))
+			lines = append(lines, row)
 		}
 	}
-	footer := "Enter open/create   Esc quit   ? help"
+	footer := dim(fmt.Sprintf("%s  %s  %s", keyHint("Enter", "open/create"), "Esc quit", keyHint("?", "help")))
 	if view == "profiles" {
-		footer = "Enter open/create   Esc back   ? help"
+		footer = dim(fmt.Sprintf("%s  %s  %s", keyHint("Enter", "open/create"), "Esc back", keyHint("?", "help")))
 	}
-	lines = append(lines, padRightVisible(footer, cols))
+	lines = append(lines, footer)
 	if len(lines) > rows {
 		lines = lines[:rows]
 	}
@@ -426,6 +444,20 @@ func drawDashboard(size terminalDimensions, view string, items []map[string]any,
 	for _, line := range lines {
 		fmt.Fprint(os.Stdout, line, "\r\n")
 	}
+}
+
+// tabLabel draws one end of the top bar, brightening whichever view is open.
+func tabLabel(view, name, label string) string {
+	if view == name {
+		return strongText(label)
+	}
+	return gray(label)
+}
+
+// keyHint puts the key in front of what it does, the way every TUI cheat sheet
+// does, so the footer can be scanned rather than read.
+func keyHint(key, action string) string {
+	return cyan(key) + " " + action
 }
 
 func displayValue(value any) string {
@@ -442,13 +474,7 @@ func searchableRow(view string, row map[string]any) string {
 	return strings.Join([]string{displayValue(row["name"]), displayValue(row["connectType"]), displayValue(row["host"]), displayValue(row["username"]), displayValue(row["command"])}, " ")
 }
 
-func padRightVisible(value string, width int) string {
-	runes := []rune(value)
-	if len(runes) > width {
-		runes = runes[:max(0, width)]
-	}
-	return string(runes) + strings.Repeat(" ", max(0, width-len(runes)))
-}
+// 宽度感知的 padRightVisible 在 style.go 里（按终端列宽补齐，中文按两列算）。
 
 func readTerminalInput(output chan<- []byte) {
 	buf := make([]byte, 256)

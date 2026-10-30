@@ -54,6 +54,17 @@ func Parse(args []string) Arguments {
 			continue
 		}
 		result.Set[key] = true
+		// "--color" is the one flag whose value is optional: bare --color means
+		// "always", while --color=never and --color never both make sense.
+		if key == "color" {
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") && isColorMode(args[i+1]) {
+				i++
+				result.Flags["color"] = strings.ToLower(args[i])
+			} else {
+				result.Flags["color"] = "always"
+			}
+			continue
+		}
 		if boolean[key] {
 			result.Flags[key] = "true"
 			continue
@@ -75,17 +86,23 @@ func Main(args []string) error {
 	parsed := Parse(args)
 	words := parsed.Words
 	flags := parsed.Flags
+	applyColorPreference(flags)
 	group, action := word(words, 0), word(words, 1)
 	if parsed.Set["version"] || group == "version" {
 		if flagBool(flags, "json") {
 			printOutput(map[string]any{"name": "shellink", "version": rpc.Version, "commit": rpc.Commit, "protocolVersion": rpc.ProtocolVersion}, true)
 		} else {
-			fmt.Printf("Shellink %s (%s)\nProtocol %d\n", rpc.Version, rpc.Commit, rpc.ProtocolVersion)
+			fmt.Printf("%s %s  %s\n", strongText("Shellink"), cyan(rpc.Version), dim("commit "+rpc.Commit+"  \u00b7  protocol "+strconv.Itoa(rpc.ProtocolVersion)))
 		}
 		return nil
 	}
 	if parsed.Set["help"] || group == "help" || group == "" {
-		fmt.Print(help(groupOrDefault(group)))
+		// "shellink help session" asks for the topic named after the word.
+		topic := groupOrDefault(group)
+		if group == "help" {
+			topic = groupOrDefault(action)
+		}
+		fmt.Print(help(topic))
 		return nil
 	}
 	if group == "agent-doc" {
@@ -420,16 +437,15 @@ func printOutput(value any, jsonLine bool) {
 		fmt.Println(text)
 		return
 	}
-	var data []byte
-	var err error
 	if jsonLine {
-		data, err = json.Marshal(value)
-	} else {
-		data, err = json.MarshalIndent(value, "", "  ")
+		// Machine output must stay byte-for-byte what it always was: a single
+		// line, no color, no table.
+		if data, err := json.Marshal(value); err == nil {
+			fmt.Println(string(data))
+		}
+		return
 	}
-	if err == nil {
-		fmt.Println(string(data))
-	}
+	fmt.Println(render(value))
 }
 
 func requestOnlyError(_ protocol.Value, err error) error { return err }
@@ -439,6 +455,28 @@ func word(words []string, index int) string {
 	}
 	return ""
 }
+
+// isColorMode reports whether the word names one of the three accepted
+// settings, so `--color never` is not mistaken for a positional argument.
+func isColorMode(value string) bool {
+	switch strings.ToLower(value) {
+	case "auto", "always", "never":
+		return true
+	}
+	return false
+}
+
+// applyColorPreference lets one run override the environment, which is how a
+// user asks for color while piping into `less -R` or turns it off for paste.
+func applyColorPreference(flags map[string]string) {
+	mode := strings.ToLower(flags["color"])
+	if !isColorMode(mode) {
+		return
+	}
+	ResetColorForTest()
+	_ = os.Setenv("SHELLINK_COLOR", mode)
+}
+
 func groupOrDefault(value string) string {
 	if value == "" {
 		return "root"
@@ -486,16 +524,149 @@ func intOption(flags map[string]string, key string, fallback int) int {
 	return fallback
 }
 
+// help renders one help page. The text is unchanged from before; what changed
+// is that it now reads like a page instead of one long line: a bold title,
+// aligned columns, dim options and a couple of real examples, which is the part
+// people actually copy.
 func help(topic string) string {
-	if topic == "profile" {
-		return "Usage: shellink profile list|get|create|update|delete\nCredentials must be passed through --input FILE or stdin.\n"
+	switch topic {
+	case "profile":
+		return commandPage(
+			"Profile", "Manage SSH and command profiles",
+			"shellink profile list|get|create|update|delete",
+			[]example{
+				{"list", "shellink profile list"},
+				{"list only the ones matching a word", "shellink profile list --query prod"},
+				{"create from a JSON body", "shellink profile create --input profile.json"},
+			},
+			[]string{"Credentials are only ever read with --input FILE or from stdin.", "--input - reads the body from standard input."},
+		)
+	case "session":
+		return commandPage(
+			"Session", "Create, drive and inspect terminal sessions",
+			"shellink session list|create|state|history|input|exec|exec-status|exec-cancel|upload|download|edit|mode|close|remove-record",
+			[]example{
+				{"list sessions", "shellink session list"},
+				{"open one against a profile", "shellink session create --profile <profile-id>"},
+				{"run a command in it", "shellink session exec --id <id> --command \"uptime\""},
+				{"watch what it printed", "shellink session history --id <id> --limit 200"},
+			},
+			[]string{
+				"File transfer needs AUTO mode: MANUAL means a human holds the terminal.",
+				"--detach returns a job id immediately and runs the job in the background.",
+				"exec-status/exec-cancel take a job ID (from exec --detach or upload/download --detach), not a session ID: shellink session exec-status '<job-id>'",
+			},
+		)
+	case "server":
+		return commandPage(
+			"Server", "Manage the background daemon",
+			"shellink server start|status|stop|restart|logs|run",
+			[]example{
+				{"start it in the background", "shellink server start"},
+				{"see whether it is up", "shellink server status"},
+				{"tail the log", "shellink server logs --lines 100"},
+			},
+			[]string{"start/stop/restart are used by the launcher; run serves one process in the foreground."},
+		)
+	case "webhook":
+		return commandPage(
+			"Webhook", "Manage event callbacks",
+			"shellink webhook list|create|delete",
+			[]example{
+				{"list callbacks", "shellink webhook list"},
+				{"add one", "shellink webhook create --input webhook.json"},
+			},
+			nil,
+		)
+	case "mcp":
+		return commandPage(
+			"MCP", "Speak the Model Context Protocol over stdio",
+			"shellink mcp serve",
+			[]example{{"let an agent drive Shellink", "shellink mcp serve"}},
+			[]string{"One line of JSON per message on stdout; nothing else is printed there."},
+		)
+	case "upgrade":
+		return commandPage(
+			"Upgrade", "Replace a release binary with a newer one",
+			"shellink upgrade [--check] [--yes]",
+			[]example{
+				{"only look for a newer release", "shellink upgrade --check"},
+				{"download and replace", "shellink upgrade"},
+			},
+			nil,
+		)
 	}
-	if topic == "session" {
-		return "Usage: shellink session list|create|state|history|input|exec|exec-status|exec-cancel|upload|download|edit|mode|close|remove-record\n" +
-			"exec-status/exec-cancel take a job ID (from exec --detach or upload/download --detach), not a session ID: shellink session exec-status '<job-id>'\n"
+	return rootHelp()
+}
+
+type example struct {
+	line    string
+	command string
+}
+
+// commandPage lays one topic out: what it is, how it is called, what to type,
+// and the small print nobody reads until something fails.
+func commandPage(title, summary, usage string, examples []example, notes []string) string {
+	var out strings.Builder
+	out.WriteString(strongText(title) + "  " + dim("\u2014") + "  " + summary + "\n\n")
+	out.WriteString(headText("Usage") + "\n  " + strongText(usage) + "\n")
+	if len(examples) > 0 {
+		out.WriteString("\n" + headText("Examples") + "\n")
+		width := 0
+		for _, item := range examples {
+			width = max(width, visibleWidth(item.line))
+		}
+		for _, item := range examples {
+			out.WriteString(fmt.Sprintf("  %s  %s\n", padRightVisible(item.line, width), cyan(item.command)))
+		}
 	}
-	if topic == "server" {
-		return "Usage: shellink server start|status|stop|restart|logs|run\n"
+	if len(notes) > 0 {
+		out.WriteString("\n" + headText("Notes") + "\n")
+		for _, note := range notes {
+			out.WriteString("  " + gray(symbolPointer) + " " + dim(note) + "\n")
+		}
 	}
-	return fmt.Sprintf("Shellink %s\n\nUsage: shellink <command> [options]\n\nCommands:\n  cli          Interactive session console\n  server       Manage the daemon\n  profile      Manage connection profiles\n  session      Manage terminal sessions\n  webhook      Manage event callbacks\n  mcp          Expose Shellink over the Model Context Protocol (stdio)\n  agent-doc    Print AI agent documentation\n  version      Print version information\n  upgrade      Upgrade a release binary\n\nUse shellink <command> --help for details.\n", rpc.Version)
+	return out.String()
+}
+
+func rootHelp() string {
+	var out strings.Builder
+	out.WriteString(strongText("Shellink "+rpc.Version) + "  " + dim("commit "+rpc.Commit+"  \u00b7  protocol "+strconv.Itoa(rpc.ProtocolVersion)) + "\n")
+	out.WriteString(dim("Terminal sessions that a human and an agent can share.\n"))
+	out.WriteString("\n" + headText("Usage") + "\n  " + strongText("shellink <command> [options]") + "\n")
+	commands := [][2]string{
+		{"cli", "Interactive session console"},
+		{"server", "Manage the daemon"},
+		{"profile", "Manage connection profiles"},
+		{"session", "Manage terminal sessions"},
+		{"webhook", "Manage event callbacks"},
+		{"mcp", "Serve the Model Context Protocol over stdio"},
+		{"agent-doc", "Print AI agent documentation"},
+		{"version", "Print version information"},
+		{"upgrade", "Upgrade a release binary"},
+	}
+	out.WriteString("\n" + headText("Commands") + "\n")
+	for _, item := range commands {
+		out.WriteString("  " + cyan(padRightVisible(item[0], 12)) + item[1] + "\n")
+	}
+	options := [][2]string{
+		{"--json", "One JSON object per line, for scripts"},
+		{"--color auto|always|never", "Colorize the human readable form"},
+		{"--help, -h", "Show this help"},
+	}
+	out.WriteString("\n" + headText("Global options") + "\n")
+	for _, item := range options {
+		out.WriteString("  " + yellow(padRightVisible(item[0], 26)) + dim(item[1]) + "\n")
+	}
+	out.WriteString("\n" + headText("Examples") + "\n")
+	for _, item := range []example{
+		{"list everything", "shellink session list"},
+		{"machine readable list", "shellink session list --json"},
+		{"one answer as an object", "shellink profile get <id>"},
+		{"details for one command", "shellink help session"},
+	} {
+		out.WriteString("  " + cyan(item.command) + "  " + dim(item.line) + "\n")
+	}
+	out.WriteString("\n" + dim("Use shellink <command> --help for details.\n"))
+	return out.String()
 }

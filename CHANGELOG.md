@@ -18,7 +18,15 @@ The GitHub Release body is generated from the matching section in this file
 
 ### Added
 
+- Human readable command output: results print as aligned tables and key/value rows in the terminal instead of indented JSON. States (`WAITING_INPUT`, `DISCONNECTED`), `MANUAL`/`AUTO`, booleans, URLs and sizes carry their own colors, command output prints as an untouched block under its key, and overflowing tables say how many columns were left out rather than hiding them.
+- `--color auto|always|never` for the human readable output, alongside the existing `NO_COLOR` handling. Sequences are never written when stdout is a pipe or a file.
+- Per-command help pages (`shellink help session`, `server`, `profile`, `webhook`, `mcp`, `upgrade`) with usage, copyable examples and notes, plus a root page listing every command, the global options and examples.
+
 ### Changed
+
+- `shellink version` prints one line instead of two, framed the way the rest of the output is.
+- Errors carry a red mark on stderr when the terminal supports it.
+- The interactive dashboard is colored: the open view is brighter, selected rows carry a pointer, and each session's state and mode use the same colors as the commands.
 
 ### Fixed
 

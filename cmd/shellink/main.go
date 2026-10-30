@@ -20,7 +20,7 @@ func main() {
 		return
 	}
 	if err := cli.Main(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, cli.ErrorLine(err.Error()))
 		var app *service.AppError
 		if errors.As(err, &app) && app.Status == 400 {
 			os.Exit(2)

@@ -22,12 +22,28 @@ description: >-
 
 ```bash
 SL="$(command -v shellink || echo "$HOME/Desktop/tool/shellink-cli/shellink")"
-"$SL" -V   # 验证输出："Shellink <版本> (<commit>)"
+"$SL" -V   # 验证输出："Shellink <版本>  commit <commit>  ·  protocol <n>"
 ```
 
 两者都失败时，告知用户二进制缺失。不要下载或安装任何东西。
 
 下文命令写作 `shellink ...`，实际执行时用 `"$SL" ...`。所有命令都会自动启动用户级守护进程。加 `--json` 获取稳定的机器可读输出。
+
+## 输出格式（重要）
+
+默认输出是**给人看的**：列表渲染成对齐表格，对象渲染成对齐的 key/value 行，
+状态、模式、布尔值、URL、体积各自带颜色；命令输出以原样块的形式打印在对应 key 下。
+给 AI/Agent 或脚本解析时必须加 `--json`，此时输出是**单行紧凑 JSON**，与以前完全一致。
+
+```bash
+"$SL" session list            # 人看：表格 + 状态配色
+"$SL" session list --json     # 脚本：单行 JSON
+"$SL" profile get <id>        # 人看：对齐字段
+"$SL" --color never session list   # 不要颜色（也可设 NO_COLOR=1）
+```
+
+表格放不下的列会被收起，并在末尾提示 `… N more columns · use --json for everything`，
+即完整数据只在 `--json` 里。
 
 ## 任何 Shellink 任务的第一步
 
