@@ -305,6 +305,10 @@ func handleRPC(connection *client.Client, words []string, flags map[string]strin
 		}
 		return requestOnlyError(request(method, map[string]any{"id": sid, "command": command, "timeoutMs": timeoutMS}, wait))
 	case "exec-status":
+		jobID := flags["job"]
+		if jobID == "" {
+			jobID = required(id, "job ID (positional) or --job; a session ID is rejected by the daemon with Job not found")
+		}
 		since, err := parseInt(flags["since"], 0)
 		if err != nil {
 			return err
@@ -313,9 +317,13 @@ func handleRPC(connection *client.Client, words []string, flags map[string]strin
 		if err != nil {
 			return err
 		}
-		return requestOnlyError(request("sessions.execStatus", map[string]any{"jobId": sid, "since": since, "waitMs": waitMS}, time.Duration(waitMS+1000)*time.Millisecond))
+		return requestOnlyError(request("sessions.execStatus", map[string]any{"jobId": jobID, "since": since, "waitMs": waitMS}, time.Duration(waitMS+1000)*time.Millisecond))
 	case "exec-cancel":
-		return requestOnlyError(request("sessions.execCancel", map[string]any{"jobId": sid}, 0))
+		jobID := flags["job"]
+		if jobID == "" {
+			jobID = required(id, "job ID (positional) or --job")
+		}
+		return requestOnlyError(request("sessions.execCancel", map[string]any{"jobId": jobID}, 0))
 	case "mode":
 		return requestOnlyError(request("sessions.mode", map[string]any{"id": sid, "mode": required(flags["mode"], "--mode")}, 0))
 	case "close":
@@ -372,7 +380,7 @@ func handleRPC(connection *client.Client, words []string, flags map[string]strin
 		}
 		return requestOnlyError(request(method, body, requestTimeout))
 	default:
-		return fmt.Errorf("usage: shellink session list|create|state|history|input|exec|exec-status|exec-cancel|upload|download|edit|mode|close|remove-record")
+		return fmt.Errorf("usage: shellink session list|create|state|history|input|exec|exec-status|exec-cancel|upload|download|edit|mode|close|remove-record\nexec-status/exec-cancel take a job ID (positional or --job), not a session ID")
 	}
 }
 
@@ -483,7 +491,8 @@ func help(topic string) string {
 		return "Usage: shellink profile list|get|create|update|delete\nCredentials must be passed through --input FILE or stdin.\n"
 	}
 	if topic == "session" {
-		return "Usage: shellink session list|create|state|history|input|exec|exec-status|exec-cancel|upload|download|edit|mode|close|remove-record\n"
+		return "Usage: shellink session list|create|state|history|input|exec|exec-status|exec-cancel|upload|download|edit|mode|close|remove-record\n" +
+			"exec-status/exec-cancel take a job ID (from exec --detach or upload/download --detach), not a session ID: shellink session exec-status '<job-id>'\n"
 	}
 	if topic == "server" {
 		return "Usage: shellink server start|status|stop|restart|logs|run\n"

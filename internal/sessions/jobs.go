@@ -206,7 +206,11 @@ func (m *Manager) waitJob(jobID string, wait time.Duration, terminal bool) (*Job
 		job := m.jobs[jobID]
 		if job == nil {
 			m.jobsMu.Unlock()
-			return nil, service.NotFound("Job not found")
+			hint := ""
+			if m.Get(jobID) != nil {
+				hint = " (that ID is a session, not a job; pass the job ID printed when the detached operation started)"
+			}
+			return nil, service.NotFound("Job not found" + hint)
 		}
 		if jobPredicate(job.Status, terminal) || wait <= 0 {
 			copy := cloneJob(job)

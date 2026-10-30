@@ -21,7 +21,14 @@ import (
 	"shellink/internal/service"
 )
 
-const transferChunkSize = 384
+// transferChunkSize is the initial base64 payload per staging command in the
+// fallback (chunked) upload path. The canonical tty line limit is 4096 on
+// Linux but 1024 on macOS/BSD, so the uploader probes: an oversized line hangs
+// the remote shell, and on failure the chunk size halves until a marker comes
+// back (down to the historical 384-byte floor).
+const transferChunkSize = 3400
+
+const transferChunkMinSize = 384
 
 type transferCodec string
 
@@ -383,6 +390,14 @@ func (m *Manager) uploadBytes(ctx context.Context, session *Session, remotePath 
 	if err := checkTransferReady(session); err != nil {
 		return uploadMeta{}, err
 	}
+	// Fast path: stream raw bytes through the PTY while a remote `head -c`
+	// collects them. One handshake round trip, then throughput is bounded by
+	// the link rather than by chunked command round trips. Falls back to the
+	// chunked base64 path when the remote lacks sha256sum/head or the stream
+	// fails verification.
+	if meta, ok := m.uploadBytesRaw(ctx, session, remotePath, data, digest); ok {
+		return meta, nil
+	}
 	codec, err := m.probeTransferCodec(ctx, session)
 	if err != nil {
 		return uploadMeta{}, err
@@ -395,15 +410,31 @@ func (m *Manager) uploadBytes(ctx context.Context, session *Session, remotePath 
 	if _, err := m.commandMarker(ctx, session, ": > "+qStage+"; stty -echo 2>/dev/null || true", regexp.MustCompile(`(?m)^SP_READY$`), "; printf '\\nSP_READY\\n'"); err != nil {
 		return uploadMeta{}, err
 	}
+	chunkSize := transferChunkSize
 	for offset, seq := 0, 0; offset < len(encoded); seq++ {
-		end := min(offset+transferChunkSize, len(encoded))
+		if offset+chunkSize > len(encoded) {
+			chunkSize = len(encoded) - offset
+		}
+		end := min(offset+chunkSize, len(encoded))
 		chunk := encoded[offset:end]
-		offset = end
 		marker := fmt.Sprintf("SP_U_%s_%d", token, seq)
 		cmd := "printf '%s' '" + chunk + "' >> " + qStage + "; printf '\\n%s%s\\n' '" + marker[:len(marker)/2] + "' '" + marker[len(marker)/2:] + "'"
 		if _, err := m.writeAndWaitMarker(ctx, session, cmd, regexp.MustCompile(`(?m)^`+regexp.QuoteMeta(marker)+`$`)); err != nil {
-			return uploadMeta{}, transferFailure("Upload staging timed out", err)
+			// An oversized line wedges the canonical tty input queue (macOS
+			// caps it at 1024). Halve the chunk and retry the same offset; the
+			// wedged bytes sit in the tty queue unprocessed because the remote
+			// shell never sees a newline.
+			if chunkSize <= transferChunkMinSize {
+				return uploadMeta{}, transferFailure("Upload staging timed out", err)
+			}
+			chunkSize = max(chunkSize/2, transferChunkMinSize)
+			seq--
+			// Drain anything the wedged line later flushes, and unstick the
+			// remote shell if the line did land as a (broken) command.
+			_ = m.recoverWedgedLine(session)
+			continue
 		}
+		offset = end
 	}
 	checkMarker := "SP_U_SIZE_" + token
 	checkCommand := "printf '\\n%s%s:%s\\n' '" + checkMarker[:len(checkMarker)/2] + "' '" + checkMarker[len(checkMarker)/2:] + "' \"$(wc -c < " + qStage + " | tr -d ' ')\""
@@ -426,6 +457,168 @@ func (m *Manager) uploadBytes(ctx context.Context, session *Session, remotePath 
 		return uploadMeta{}, &service.AppError{Code: "TRANSFER_ERROR", Message: fmt.Sprintf("Uploaded size mismatch: expected %d, remote size is %s", len(data), remoteSize), Status: 502}
 	}
 	return uploadMeta{size: len(data), sha256: digest, codec: string(codec)}, nil
+}
+
+// recoverWedgedLine clears a staging line that wedged the remote tty input
+// queue. ^U (kill line) discards the queued canonical buffer without
+// executing it, so the partial chunk is dropped and the caller can retry the
+// same offset with a smaller size.
+func (m *Manager) recoverWedgedLine(session *Session) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = session.Write("\x15", false)
+	return m.waitPrompt(ctx, session)
+}
+
+// downloadSliceBytes is the raw byte size per slice in the sliced download path.
+// path. Each slice is one command round trip emitting ~1.3MB of base64, which
+// stays well under the marker scanner's incremental history reads.
+const downloadSliceBytes = 1 << 20
+
+var errDownloadSliceUnsupported = errors.New("sliced download not supported by remote")
+
+// downloadBytesSliced pulls a large remote file in slices, decoding each
+// incrementally instead of buffering one giant base64 payload. Each slice is
+// extracted with tail|head into a temp file so every codec's encoder can read
+// it by path, then removed.
+func (m *Manager) downloadBytesSliced(ctx context.Context, session *Session, remotePath string, remoteSize int) ([]byte, error) {
+	token := randomToken(8)
+	codec, err := m.probeTransferCodec(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	qPath := shellQuote(remotePath)
+	sliceFile := "/tmp/.shellink-" + token + ".slice"
+	qSlice := shellQuote(sliceFile)
+	data := make([]byte, 0, remoteSize)
+	for offset := 0; offset < remoteSize; offset += downloadSliceBytes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		count := min(downloadSliceBytes, remoteSize-offset)
+		begin, end := "SPB_"+token+"_"+fmt.Sprint(offset), "SPE_"+token+"_"+fmt.Sprint(offset)
+		command := "tail -c +" + fmt.Sprint(offset+1) + " " + qPath + " | head -c " + fmt.Sprint(count) + " > " + qSlice + "; " +
+			"printf '%s\\n' '" + begin + "'; " + encodeTransferFile(codec, qSlice, sliceFile) + "; rc=$?; rm -f " + qSlice + "; [ $rc -ne 0 ] && echo SLICE_FAILED; printf '\\n%s\\n' '" + end + "'"
+		output, err := m.commandFrame(ctx, session, command, begin, end)
+		if err != nil {
+			return nil, err
+		}
+		payload, err := extractMarkedPayload(output, begin, end)
+		if err != nil {
+			return nil, err
+		}
+		if strings.Contains(payload, "SLICE_FAILED") {
+			return nil, errDownloadSliceUnsupported
+		}
+		compact := compactBase64(payload)
+		var chunk []byte
+		if codec == codecXXD {
+			chunk, err = hex.DecodeString(compact)
+		} else {
+			chunk, err = base64.StdEncoding.DecodeString(compact)
+		}
+		if err != nil {
+			return nil, &service.AppError{Code: "TRANSFER_ERROR", Message: fmt.Sprintf("Unable to decode slice at offset %d", offset), Status: 502}
+		}
+		data = append(data, chunk...)
+	}
+	if len(data) != remoteSize {
+		return nil, &service.AppError{Code: "TRANSFER_ERROR", Message: fmt.Sprintf("Downloaded size mismatch: expected %d, got %d", remoteSize, len(data)), Status: 502}
+	}
+	return data, nil
+}
+
+func compactBase64(payload string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\r' || r == '\n' {
+			return -1
+		}
+		return r
+	}, payload)
+}
+
+// uploadBytesRaw streams data as raw bytes through the PTY while a remote while a remote
+// `head -c N` drains it into a staging file. The returned bool reports whether
+// the fast path completed (false means "fall back", not necessarily failure):
+// it is false when the remote shell lacks the required tools, when the link
+// mangles 8-bit data, or when verification fails.
+func (m *Manager) uploadBytesRaw(ctx context.Context, session *Session, remotePath string, data []byte, digest string) (uploadMeta, bool) {
+	if len(data) < 2048 {
+		return uploadMeta{}, false
+	}
+	token := randomToken(8)
+	qPath := shellQuote(remotePath)
+	staged := "/tmp/.shellink-" + token + ".bin"
+	targetTmp := "/tmp/.shellink-" + token + ".tmp"
+	qStage, qTargetTmp := shellQuote(staged), shellQuote(targetTmp)
+	// Probe the required tools in one shot; pick the sha256 implementation too.
+	probeMarker := "SP_RAW_PROBE_" + token
+	probe := "if ! command -v head >/dev/null 2>&1; then v=no; elif command -v sha256sum >/dev/null 2>&1; then v=ok:sha256sum; elif command -v shasum >/dev/null 2>&1; then v=ok:shasum; else v=no; fi; " +
+		"printf '\\n%s:%s\\n' '" + probeMarker + "' \"$v\""
+	probeRe := regexp.MustCompile(`(?m)^` + probeMarker + `:(ok:(sha256sum|shasum)|no)$`)
+	probeOutput, err := m.commandMarker(ctx, session, probe, probeRe, "")
+	if err != nil || lastCapture(probeOutput, probeRe, 1) == "no" {
+		return uploadMeta{}, false
+	}
+	hashCommand := "sha256sum"
+	if lastCapture(probeOutput, probeRe, 1) == "ok:shasum" {
+		hashCommand = "shasum -a 256"
+	}
+	readyMarker := "SP_RAW_READY_" + token
+	// stty -echo keeps the tty from mirroring the inbound stream back into the
+	// output history (which would double the transferred volume). head -c reads
+	// exactly len(data) bytes from the PTY input, then the verification branch
+	// reports size, sha256, and a completion marker.
+	command := "stty -echo -icanon 2>/dev/null; : > " + qStage + "; head -c " + fmt.Sprint(len(data)) + " > " + qStage + "; stty echo icanon 2>/dev/null; " +
+		"s=$(wc -c < " + qStage + " | tr -d ' '); h=$(" + hashCommand + " < " + qStage + " | cut -d' ' -f1); " +
+		"printf '\\n%s:%s:%s\\n' '" + readyMarker + "' \"$s\" \"$h\""
+	seq := session.LastSequence()
+	if err := session.Write(command+"\n", true); err != nil {
+		return uploadMeta{}, false
+	}
+	// The command is on its way; head is now consuming the input stream. Push
+	// the payload in writes small enough to stay ahead of the remote reader
+	// without overflowing the PTY buffer on slow links.
+	doneRe := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(readyMarker) + `:(\d+):([0-9a-f]{64})$`)
+	writeErr := func() error {
+		chunk := make([]byte, 0, 8192)
+		for offset := 0; offset < len(data); {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			n := min(8192, len(data)-offset)
+			chunk = append(chunk[:0], data[offset:offset+n]...)
+			if err := session.Write(string(chunk), false); err != nil {
+				return err
+			}
+			offset += n
+		}
+		return nil
+	}()
+	output, waitErr := m.waitOutputMarker(ctx, session, seq, doneRe)
+	if writeErr != nil || waitErr != nil {
+		// The stream failed mid-flight; the remote may still be in raw mode.
+		_ = session.Write("\x03stty echo icanon 2>/dev/null\n", false)
+		return uploadMeta{}, false
+	}
+	sizeStr := lastCapture(output, doneRe, 1)
+	hash := lastCapture(output, doneRe, 2)
+	if sizeStr != fmt.Sprint(len(data)) || hash != digest {
+		_, _ = m.commandMarker(ctx, session, "rm -f "+qStage, regexp.MustCompile(`(?m)^SP_CLEAN_\d+$`), "; printf '\\nSP_CLEAN_%s\\n' $$")
+		_ = session.Write("\x15\n", false)
+		return uploadMeta{}, false
+	}
+	finalMarker := "SP_RAW_UP_" + token
+	final := "head -c " + fmt.Sprint(len(data)) + " " + qStage + " > " + qTargetTmp + "; mv -f " + qTargetTmp + " " + qPath + " 2>/dev/null || { cp " + qTargetTmp + " " + qPath + " && rm -f " + qTargetTmp + "; }; rm -f " + qStage + "; printf '\\n%s:%s\\n' '" + finalMarker + "' \"$(wc -c < " + qPath + " | tr -d ' ')\""
+	finalOutput, err := m.commandMarker(ctx, session, final, regexp.MustCompile(`(?m)^`+finalMarker+`:(\d+)$`), "")
+	if err != nil {
+		return uploadMeta{}, false
+	}
+	remoteSize := lastCapture(finalOutput, regexp.MustCompile(`(?m)^`+finalMarker+`:(\d+)$`), 1)
+	if remoteSize != fmt.Sprint(len(data)) {
+		return uploadMeta{}, false
+	}
+	return uploadMeta{size: len(data), sha256: digest, codec: "raw"}, true
 }
 
 func (m *Manager) probeTransferCodec(ctx context.Context, session *Session) (transferCodec, error) {
@@ -521,6 +714,20 @@ func (m *Manager) downloadBytes(ctx context.Context, session *Session, remotePat
 	}
 	if remoteSize > m.cfg.TransferMaxBytes {
 		return nil, "", &service.AppError{Code: "PAYLOAD_TOO_LARGE", Message: fmt.Sprintf("File is too large (%d bytes); limit is %d bytes", remoteSize, m.cfg.TransferMaxBytes), Status: 413}
+	}
+	// Large files are pulled in slices: one command round trip per slice with
+	// incremental decoding, instead of one giant base64 blob that the marker
+	// scanner would rescan from scratch on every poll (quadratic in file size)
+	// and the history buffer might truncate.
+	if remoteSize > downloadSliceBytes {
+		data, err := m.downloadBytesSliced(ctx, session, remotePath, remoteSize)
+		if err == nil {
+			return data, codec, nil
+		}
+		if !errors.Is(err, errDownloadSliceUnsupported) {
+			return nil, "", err
+		}
+		// Fall through to the single-frame path below.
 	}
 	begin, end := "SPB_"+token, "SPE_"+token
 	command := "printf '%s\\n' '" + begin + "'; " + encodeTransferFile(codec, qPath, remotePath) + "; printf '\\n%s\\n' '" + end + "'"
