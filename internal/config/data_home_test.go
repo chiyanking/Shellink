@@ -99,6 +99,43 @@ func TestResolveDataHomeUnixDefault(t *testing.T) {
 	}
 }
 
+// The marker file is what makes the distributed archive portable: the folder
+// keeps its own database so it can be moved to another disk or handed to
+// someone else with the history intact.
+func TestResolveDataHomeUsesPortableFolderWhenMarked(t *testing.T) {
+	appData := t.TempDir()
+	folder := t.TempDir()
+	portable := filepath.Join(folder, "shellink-data")
+	if err := os.WriteFile(filepath.Join(folder, PortableMarker), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveDataHomeWith(env(map[string]string{"APPDATA": appData}), "windows", t.TempDir(), portable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != portable {
+		t.Fatalf("portable marker ignored: got %q want %q", got, portable)
+	}
+}
+
+// An explicit SHELLINK_HOME still wins over the marker, so a portable copy can
+// be pointed at a shared database without editing the folder.
+func TestResolveDataHomeExplicitHomeBeatsPortableMarker(t *testing.T) {
+	folder := t.TempDir()
+	portable := filepath.Join(folder, "shellink-data")
+	if err := os.WriteFile(filepath.Join(folder, PortableMarker), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	explicit := t.TempDir()
+	got, err := resolveDataHomeWith(env(map[string]string{"SHELLINK_HOME": explicit, "APPDATA": t.TempDir()}), "windows", t.TempDir(), portable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != explicit {
+		t.Fatalf("SHELLINK_HOME lost to the marker: got %q want %q", got, explicit)
+	}
+}
+
 func env(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }

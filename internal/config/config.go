@@ -158,6 +158,8 @@ func LoadFrom(getenv func(string) string, goos string) (Config, error) {
 // copied to another drive, unpacked from a portable archive or started on a
 // machine where %APPDATA% is locked down, so:
 //   - an explicit SHELLINK_HOME always wins;
+//   - then a folder carrying the portable marker
+//     (see PortableMarker), so an extracted archive stays self-contained;
 //   - otherwise the per-user default is used, as long as it is writable;
 //   - a default that already holds a database is kept even when the writability
 //     probe fails, because a transient failure must not look like lost history;
@@ -167,7 +169,7 @@ func LoadFrom(getenv func(string) string, goos string) (Config, error) {
 // The portable folder must never take precedence merely because it exists:
 // that silently switches the database, so a user who unzips the binaries into
 // a new folder would find an empty session list while the real history stayed
-// behind in the old location. Choose it explicitly with SHELLINK_HOME instead.
+// behind in the old location. Only the marker file opts in.
 func resolveDataHome(getenv func(string) string, goos, userHome string) (string, error) {
 	return resolveDataHomeWith(getenv, goos, userHome, portableDataHome())
 }
@@ -181,6 +183,15 @@ var writableProbe = writableDirectory
 func resolveDataHomeWith(getenv func(string) string, goos, userHome, portable string) (string, error) {
 	if explicit := getenv("SHELLINK_HOME"); explicit != "" {
 		return explicit, nil
+	}
+	// Portable mode is opt-in per folder, not a guess: the marker file ships
+	// with the archive, so an extracted folder keeps its database beside the
+	// executable and can be moved (or zipped up and handed to someone else)
+	// without losing history. A bare "shellink-data" folder is deliberately not
+	// enough, because that is exactly the state a previous fallback leaves
+	// behind and it must not silently take over an existing database.
+	if portable != "" && portableRequested(portable) {
+		return portable, nil
 	}
 	fallback, err := defaultDataHome(getenv, goos, userHome)
 	if err != nil {
@@ -230,9 +241,22 @@ func defaultDataHome(getenv func(string) string, goos, userHome string) (string,
 	return filepath.Join(base, "Shellink"), nil
 }
 
-// portableDataHome is the fallback folder beside the executable. It is only
-// used when the per-user directory cannot be written, which is the case for a
-// locked-down %APPDATA% or a copy running from a read-only location.
+// PortableMarker is the file that switches a folder into portable mode. Its
+// presence next to the executable means "keep everything in this folder", which
+// is what makes the distributed archive self-contained.
+const PortableMarker = "shellink.portable"
+
+// portableRequested reports whether the folder holding the executable carries
+// the portable marker.
+func portableRequested(portableDir string) bool {
+	marker := filepath.Join(filepath.Dir(portableDir), PortableMarker)
+	info, err := os.Stat(marker)
+	return err == nil && !info.IsDir()
+}
+
+// portableDataHome is the folder beside the executable. It is used when the
+// folder carries the portable marker, and as a fallback when the per-user
+// directory cannot be written (locked-down %APPDATA%, read-only location).
 func portableDataHome() string {
 	executable, err := os.Executable()
 	if err != nil {
