@@ -242,17 +242,47 @@ func portableDataHome() string {
 }
 
 func writableDirectory(path string) bool {
+	return CheckDataHome(path) == nil
+}
+
+// CheckDataHome explains why a data directory cannot be used, naming the exact
+// directory. A failed start otherwise blames "the data directory" in general
+// and leaves the user guessing whether it was the folder, the log file or the
+// database that the system refused.
+func CheckDataHome(path string) error {
 	if err := os.MkdirAll(path, 0700); err != nil {
-		return false
+		return fmt.Errorf("data directory %s cannot be created: %w", path, err)
 	}
 	probe, err := os.CreateTemp(path, ".shellink-probe-*")
 	if err != nil {
-		return false
+		return fmt.Errorf("data directory %s is not writable: %w%s", path, err, lowIntegrityHint())
 	}
 	name := probe.Name()
 	_ = probe.Close()
 	_ = os.Remove(name)
-	return true
+	return nil
+}
+
+// lowIntegrityHint explains the Windows cause that looks like a data directory
+// problem but is not: an executable stored in a folder marked "low integrity"
+// (browser downloads, extracted archives) runs with a low integrity token, and
+// Windows then refuses every write into the user profile. The data directory is
+// perfectly writable for any other process, so without this note the only
+// visible symptom is a bare "Access is denied".
+func lowIntegrityHint() string {
+	temp, err := os.CreateTemp("", "shellink-write-*")
+	if err != nil {
+		executable, exeErr := os.Executable()
+		if exeErr != nil {
+			return ""
+		}
+		folder := filepath.Dir(executable)
+		return fmt.Sprintf("\n  the process cannot write %s either, so the problem is not this folder: %s is probably marked low integrity (typical for downloaded files). Copy the folder somewhere else, or run: icacls \"%s\" /setintegritylevel (OI)(CI)Medium /T", os.TempDir(), folder, folder)
+	}
+	name := temp.Name()
+	_ = temp.Close()
+	_ = os.Remove(name)
+	return ""
 }
 
 func numericUID() string {

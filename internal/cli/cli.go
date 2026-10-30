@@ -152,6 +152,12 @@ func handleServer(cfg config.Config, action string, flags map[string]string) err
 		}
 		return err
 	case "start", "restart":
+		// Fail with the folder name when the data directory cannot be written:
+		// the daemon's own complaint is written to a log file that may be the
+		// very thing that is not writable.
+		if err := config.CheckDataHome(cfg.DataHome); err != nil {
+			return err
+		}
 		if action == "restart" {
 			if current, err := daemon.Connect(cfg, time.Second); err == nil {
 				_, _ = current.Request("system.stop", protocol.Object(), time.Second)
@@ -163,8 +169,20 @@ func handleServer(cfg config.Config, action string, flags map[string]string) err
 		if err != nil {
 			return err
 		}
-		defer current.Close()
+		// The instance that answers here may be the one that is still shutting
+		// down (the user pressed Stop a moment ago): it accepts the connection
+		// and then drops the request. Wait for it to go away and bring up a
+		// fresh daemon instead of exiting non-zero over a half-closed pipe.
 		value, err := current.Request("system.status", protocol.Object(), 5*time.Second)
+		if err != nil {
+			current.Close()
+			time.Sleep(time.Second)
+			if retry, retryErr := daemon.Ensure(cfg, 10*time.Second); retryErr == nil {
+				current = retry
+				value, err = current.Request("system.status", protocol.Object(), 5*time.Second)
+			}
+		}
+		defer current.Close()
 		if err == nil {
 			printOutput(protocol.ToJSONValue(value), flagBool(flags, "json"))
 		}
