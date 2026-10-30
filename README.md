@@ -161,7 +161,22 @@ shellink session exec SESSION_ID --command "long-build" --detach --json
 shellink session exec-status JOB_ID --since 0 --wait 20000 --json
 ```
 
+`exec-status` and `exec-cancel` take a job ID (positional or `--job`), not a session ID.
+
 Continue polling with the returned cursor as `--since` until `done` is true. To cancel a job, run `shellink session exec-cancel JOB_ID --json`. Remote edits use exact text replacements; each match must occur once, edits cannot overlap, and the session must be in `AUTO` mode and `WAITING_INPUT` state.
+
+### Transfer strategy
+
+Because sessions run through a PTY (including jump-host sessions), file transfer types bytes into the terminal rather than opening an SFTP channel. Uploads and downloads pick the best available strategy automatically:
+
+| Path | When | Behavior |
+| --- | --- | --- |
+| Raw stream | Upload, remote has `head` and `sha256sum`/`shasum` | Streams raw bytes into a remote `head -c` staging file after one handshake; throughput is bounded by the link, not by round trips. Verified by size and sha256. |
+| Chunked base64 | Upload fallback, or small files | Base64 payload per staging command starts at 3400 bytes and halves adaptively when a line wedges the remote tty (canonical input is capped at 1024 bytes on macOS/BSD, 4096 on Linux). |
+| Sliced pull | Download of files over 1 MB | Pulls `tail|head` slices with incremental decoding instead of one giant base64 frame. |
+| Single frame | Everything else | One marked base64 frame for small downloads and edits. |
+
+Raw streaming falls back to chunked base64 when verification fails (for example a jump host that mangles 8-bit data), and chunked staging is size-verified before decoding, so a degraded link cannot silently corrupt a file. Very large transfers still need a direct connection or a tunnel; the PTY path is for when only a terminal is available.
 
 Session states are `CONNECTING`, `OUTPUTTING`, `WAITING_INPUT`, `IDLE`, and `DISCONNECTED`. Modes are `AUTO` and `MANUAL`.
 
