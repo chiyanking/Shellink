@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
@@ -10,8 +10,13 @@ const run = (command, args, options = {}) => {
 }
 
 run(process.execPath, [process.env.npm_execpath, 'run', 'build', '--workspace=web'])
-cpSync(join(root, 'web', 'dist'), join(root, 'internal', 'httpapi', 'assets'), { recursive: true })
-writeFileSync(join(root, 'internal', 'httpapi', 'assets', 'complete.txt'), 'ready\n')
+const uiAssets = join(root, 'internal', 'httpapi', 'assets')
+mkdirSync(uiAssets, { recursive: true })
+for (const name of readdirSync(uiAssets)) {
+  if (name !== '.gitkeep') rmSync(join(uiAssets, name), { recursive: true, force: true })
+}
+cpSync(join(root, 'web', 'dist'), uiAssets, { recursive: true })
+writeFileSync(join(uiAssets, 'complete.txt'), 'ready\n')
 mkdirSync(join(root, 'dist'), { recursive: true })
 
 const args = process.argv.slice(2)

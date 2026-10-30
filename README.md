@@ -68,7 +68,7 @@ npm install
 npm run build
 ```
 
-The executable is written to `dist/shellink` or `dist/shellink.exe`. If the embedded assets are already present, the Go binary can also be built directly:
+The executable is written to `dist/shellink` or `dist/shellink.exe`. Generated Web UI files in `web/dist/` and `internal/httpapi/assets/` are ignored by Git. Run `npm run build` after a fresh checkout or Web UI changes to generate and embed them. Once those assets are present locally, the Go binary can also be built directly:
 
 ```sh
 go build -o dist/shellink ./cmd/shellink
@@ -211,7 +211,7 @@ Keep the master key stable for as long as the database contains encrypted creden
 | --- | --- |
 | `cmd/shellink/` | Go executable entry point |
 | `internal/` | Go CLI, daemon, SSH/PTY sessions, storage, protocol, and HTTP API |
-| `internal/httpapi/assets/` | Web assets embedded in the Go binary |
+| `internal/httpapi/assets/` | Generated Web assets embedded in the Go binary; ignored by Git except for `.gitkeep` |
 | `web/` | Vue Web UI source; used to rebuild embedded assets |
 | `plugin-dsh/` | Optional TypeScript adapter for DeepSeek Harness |
 | `skills/` | Agent workflow and iTerm2 import skills |
