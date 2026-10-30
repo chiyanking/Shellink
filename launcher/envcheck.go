@@ -161,9 +161,18 @@ func collectChecks(dir string) []checkResult {
 		})
 	}
 
-	// 8. Privileges. Running elevated is not an error, but it makes the data
-	//    files owned by the administrator and the browser elevated as well.
-	if isElevated() {
+	// 8. Integrity level and privileges. A low integrity process cannot hand
+	//    the page to the browser at all - Windows keeps those processes away
+	//    from the desktop - and an elevated launcher makes the data files
+	//    administrator-owned and the browser elevated. Both are reported.
+	if rid := integrityRID(); rid != 0 && rid < integrityMedium {
+		results = append(results, checkResult{
+			label:  "运行权限",
+			status: statusFail,
+			detail: "低完整性(Low)：能启动服务，但无法自动打开浏览器",
+			fix:    fmt.Sprintf("执行 icacls \"%s\" /setintegritylevel (OI)(CI)Medium /T 后重新双击；这个标签通常继承自上级目录（浏览器下载/解压到被标记的文件夹时常见）。", dir),
+		})
+	} else if isElevated() {
 		results = append(results, checkResult{
 			label:      "运行权限",
 			status:     statusWarn,

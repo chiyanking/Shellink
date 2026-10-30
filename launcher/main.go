@@ -29,6 +29,19 @@ func main() {
 	dir := filepath.Dir(exePath)
 	core := filepath.Join(dir, "shellink.exe")
 
+	// "--open-url <url>" exercises only the browser launch path, so the part
+	// that depends on privileges can be checked without touching the daemon.
+	if len(os.Args) >= 3 && strings.EqualFold(strings.TrimLeft(os.Args[1], "-/"), "open-url") {
+		method, err := openBrowser(os.Args[2])
+		if err != nil {
+			fmt.Println("打开失败:", err)
+			os.Exit(1)
+		}
+		fmt.Println("已请求浏览器打开:", os.Args[2])
+		fmt.Println("方式:", method)
+		return
+	}
+
 	// "--check" answers "will this folder run on this machine?" without starting
 	// anything: whatever was unpacked here may lack the SSH client, may sit on a
 	// Windows release without ConPTY, or may live in a folder that cannot be
@@ -114,26 +127,46 @@ func main() {
 
 	fmt.Println("Shellink 已启动 ✓")
 	time.Sleep(800 * time.Millisecond)
+	opened := false
 	if os.Getenv("SHELLINK_NO_BROWSER") == "" {
-		// A browser running with administrator rights rejects a URL from a
-		// process that has less: Edge answers "现有实例正在以提升的权限运行"
-		// and offers to restart itself. The launcher can match an elevated
-		// browser (it inherits this process's rights), but it cannot reach a
-		// higher one, so say what to do instead of making a modal dialog pop up.
-		if !isElevated() && elevatedBrowser() {
+		// A file that carries a low mandatory label - typical for a folder that
+		// was extracted under a marked parent - makes this process low
+		// integrity, and Windows keeps such a process away from the desktop:
+		// every way of handing over the URL fails silently while the service
+		// itself runs fine. That is worth a fix line instead of a promise.
+		if rid := integrityRID(); rid != 0 && rid < integrityMedium {
+			fmt.Println()
+			fmt.Println("提示: 本程序运行在「低完整性(Low)」，Windows 不允许它把页面交给浏览器，")
+			fmt.Println("      所以浏览器不会自动弹出（服务本身已正常启动）。执行一次下面这条命令即可修复:")
+			fmt.Printf("      icacls \"%s\" /setintegritylevel (OI)(CI)Medium /T\n", dir)
+			fmt.Println("      然后重新双击本程序。这个标签一般继承自上级目录，重置上级目录才一劳永逸。")
+		} else if !isElevated() && elevatedBrowser() {
+			// A browser running with administrator rights rejects a URL from a
+			// process that has less: Edge answers "现有实例正在以提升的权限
+			// 运行" and offers to restart itself. The launcher hands the URL to
+			// the browser with the shell's rights, but it cannot reach a
+			// browser running higher than the shell, so say what to do instead
+			// of making a modal dialog pop up.
 			fmt.Println()
 			fmt.Println("提示: 现有浏览器以管理员权限运行，普通权限的启动器无法把页面交给它")
 			fmt.Println("      （Edge 会弹“现有实例正在以提升的权限运行”，选“是”会把浏览器关掉重开）。")
 			fmt.Println("      请先关闭这些浏览器窗口，或重启一次浏览器后再打开下面的地址。")
-			fmt.Println("      地址:", url)
+		} else if _, err := openBrowser(url); err != nil {
+			fmt.Println()
+			fmt.Println("提示: 没能自动打开浏览器，请手动访问下面的地址。")
+			fmt.Println("      原因:", err)
 		} else {
-			openBrowser(url)
+			opened = true
 		}
 	}
 
 	fmt.Println()
 	fmt.Println("──────────────────────────────────────────")
-	fmt.Println("Web 控制台已打开:", url)
+	if opened {
+		fmt.Println("Web 控制台已打开:", url)
+	} else {
+		fmt.Println("Web 控制台地址:", url)
+	}
 	fmt.Println("守护进程在后台运行中，可安全关闭本窗口。")
 	fmt.Println()
 	fmt.Println("常用命令（在该目录下打开终端）：")
@@ -340,29 +373,6 @@ func hintFor(message string) string {
 		return "守护进程没有起来：看上方的最近日志，通常是端口冲突或数据目录无权限。"
 	}
 	return ""
-}
-
-// openBrowser shows the web console.
-//
-// Which request actually reaches the browser depends on privileges: Edge refuses
-// a URL from a process with less rights ("现有实例正在以提升的权限运行" and a
-// prompt to restart the browser), while a request with the same rights is
-// accepted. So the launch must match whatever is already running:
-//
-//   - an elevated browser is already open → inherit (rundll32), which is
-//     exactly what an elevated process produces and what Edge accepts;
-//   - an elevated launcher with no browser open → hand the URL to the desktop
-//     shell (explorer.exe), so the browser is not started elevated in the first
-//     place, which is what poisons every later request;
-//   - otherwise → inherit (rundll32), the ordinary case.
-func openBrowser(url string) {
-	if isElevated() && !elevatedBrowser() {
-		if err := exec.Command("explorer.exe", url).Start(); err == nil {
-			return
-		}
-	}
-	c := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	_ = c.Start()
 }
 
 func pause() {

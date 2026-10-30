@@ -14,3 +14,7 @@ func forceKill(pid int) {}
 func isElevated() bool { return false }
 
 func elevatedBrowser() bool { return false }
+
+const integrityMedium = 0x2000
+
+func integrityRID() uint32 { return integrityMedium }
