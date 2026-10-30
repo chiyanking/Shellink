@@ -59,6 +59,35 @@ func TestResolveDataHomeFallsBackWhenDefaultIsNotWritable(t *testing.T) {
 	}
 }
 
+// A failure of the writability probe must not move the database away from a
+// directory that already holds one: that is what made a fresh portable folder
+// come up empty while the real session history was still in the old place.
+func TestResolveDataHomeKeepsDefaultWhenItAlreadyHoldsData(t *testing.T) {
+	appData := t.TempDir()
+	existing := filepath.Join(appData, "Shellink")
+	if err := os.MkdirAll(existing, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(existing, "shellink.db"), []byte("db"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	original := writableProbe
+	writableProbe = func(string) bool { return false }
+	defer func() { writableProbe = original }()
+
+	portable := filepath.Join(t.TempDir(), "shellink-data")
+	got, err := resolveDataHomeWith(env(map[string]string{"APPDATA": appData}), "windows", t.TempDir(), portable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != existing {
+		t.Fatalf("left the existing data directory: got %q want %q", got, existing)
+	}
+	if _, err := os.Stat(filepath.Join(portable)); err == nil {
+		t.Fatalf("portable directory should not have been created")
+	}
+}
+
 func TestResolveDataHomeUnixDefault(t *testing.T) {
 	home := t.TempDir()
 	got, err := resolveDataHomeWith(env(map[string]string{}), "darwin", home, "")

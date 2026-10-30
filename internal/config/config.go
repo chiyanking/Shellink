@@ -159,8 +159,10 @@ func LoadFrom(getenv func(string) string, goos string) (Config, error) {
 // machine where %APPDATA% is locked down, so:
 //   - an explicit SHELLINK_HOME always wins;
 //   - otherwise the per-user default is used, as long as it is writable;
-//   - when it is not writable the state moves next to the executable instead,
-//     with a warning, so the app still starts.
+//   - a default that already holds a database is kept even when the writability
+//     probe fails, because a transient failure must not look like lost history;
+//   - otherwise the state moves next to the executable, with a warning, so the
+//     app still starts instead of dying on a locked-down profile directory.
 //
 // The portable folder must never take precedence merely because it exists:
 // that silently switches the database, so a user who unzips the binaries into
@@ -169,6 +171,10 @@ func LoadFrom(getenv func(string) string, goos string) (Config, error) {
 func resolveDataHome(getenv func(string) string, goos, userHome string) (string, error) {
 	return resolveDataHomeWith(getenv, goos, userHome, portableDataHome())
 }
+
+// writableProbe reports whether Shellink may keep its state in a directory. It
+// is a variable so tests can simulate a directory that is momentarily locked.
+var writableProbe = writableDirectory
 
 // resolveDataHomeWith is resolveDataHome with the portable fallback injected so
 // the precedence rules can be tested without writing next to the test binary.
@@ -180,7 +186,15 @@ func resolveDataHomeWith(getenv func(string) string, goos, userHome, portable st
 	if err != nil {
 		return "", err
 	}
-	if writableDirectory(fallback) {
+	if writableProbe(fallback) {
+		return fallback, nil
+	}
+	// The probe can fail for reasons that pass (antivirus holding the folder for
+	// a moment, a slow network profile). Never walk away from a directory that
+	// already holds a database: a transient failure would start the app on an
+	// empty data set and look exactly like lost history. Surfacing the write
+	// error is far better than silently switching stores.
+	if hasState(fallback) {
 		return fallback, nil
 	}
 	if portable == "" || !writableDirectory(portable) {
@@ -188,6 +202,17 @@ func resolveDataHomeWith(getenv func(string) string, goos, userHome, portable st
 	}
 	fmt.Fprintf(os.Stderr, "Shellink: %s is not writable, keeping data in %s\n", fallback, portable)
 	return portable, nil
+}
+
+// hasState reports whether a directory already keeps Shellink data, which makes
+// it authoritative regardless of whether the writability probe passed.
+func hasState(dir string) bool {
+	for _, name := range []string{"shellink.db", "master.key"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultDataHome(getenv func(string) string, goos, userHome string) (string, error) {
