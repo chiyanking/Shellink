@@ -333,23 +333,22 @@ func (m *Manager) History(id string, since int64, limit int, includeInternal boo
 	if err != nil {
 		return nil, service.Internal(err)
 	}
-	outputs := make([]store.HistoryChunk, 0, len(chunks))
-	for _, chunk := range chunks {
-		if chunk.Direction == "output" {
-			outputs = append(outputs, chunk)
-		}
-	}
-	var text string
-	if includeInternal {
-		for _, chunk := range outputs {
-			text += chunk.DataRaw
-		}
-	} else {
-		text = renderHistoryWithoutInternal(outputs, "\n")
-	}
 	cursor := since
 	if len(chunks) > 0 {
 		cursor = chunks[len(chunks)-1].Seq
+	}
+	// Build an auditable transcript that keeps BOTH program output and the
+	// commands the user typed (direction == "input"), so a session's history is
+	// reviewable after the session ends — not only visible live in the terminal.
+	var text string
+	if includeInternal {
+		var sb strings.Builder
+		for _, chunk := range chunks {
+			sb.WriteString(chunk.DataRaw)
+		}
+		text = sb.String()
+	} else {
+		text = renderHistoryWithoutInternal(chunks, "\n")
 	}
 	return protocol.Object("cursor", cursor, "text", StripANSI(text)), nil
 }
@@ -656,10 +655,23 @@ func renderHistoryWithoutInternal(chunks []store.HistoryChunk, newline string) s
 			continue
 		}
 		flush()
+		if chunk.Direction == "input" {
+			// Mark user-typed commands so the audit trail is readable.
+			output.WriteString(newline + "❯ " + cleanInput(chunk.DataPlain))
+			continue
+		}
 		output.WriteString(chunk.DataRaw)
 	}
 	flush()
 	return output.String()
+}
+
+// cleanInput normalises a recorded user input string for display in the
+// auditable history: drop carriage returns and any trailing newlines.
+func cleanInput(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "")
+	return strings.TrimRight(text, "\n")
 }
 
 func limitTail(value string, maxBytes int) string {

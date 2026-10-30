@@ -85,7 +85,11 @@ async function refresh() {
 async function act(path: string, body: unknown, okKey: string) {
   busy.value = true
   try {
-    await api(path, { method: 'POST', body: JSON.stringify(body ?? {}) })
+    // NOTE: api() already JSON-encodes the body. Do NOT pre-stringify here,
+    // otherwise the body is encoded twice and the server receives a string
+    // instead of an object (e.g. mcp/config/enable and token regeneration
+    // would silently no-op).
+    await api(path, { method: 'POST', body: body ?? {} })
     message.success(t(okKey))
     await refresh()
   } catch (e) {
