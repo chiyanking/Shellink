@@ -43,27 +43,16 @@ func LoadFrom(getenv func(string) string, goos string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	dataHome := getenv("SHELLINK_HOME")
-	if dataHome == "" {
-		if goos == "windows" {
-			base := getenv("APPDATA")
-			if base == "" {
-				base, err = os.UserConfigDir()
-				if err != nil {
-					return Config{}, err
-				}
-			}
-			dataHome = filepath.Join(base, "Shellink")
-		} else {
-			dataHome = filepath.Join(userHome, ".Shellink")
-		}
+	dataHome, err := resolveDataHome(getenv, goos, userHome)
+	if err != nil {
+		return Config{}, err
 	}
 	dataHome, err = filepath.Abs(dataHome)
 	if err != nil {
 		return Config{}, err
 	}
 	if err = os.MkdirAll(dataHome, 0700); err != nil {
-		return Config{}, fmt.Errorf("create data directory: %w", err)
+		return Config{}, fmt.Errorf("create data directory %s: %w (point SHELLINK_HOME at a writable folder)", dataHome, err)
 	}
 
 	dbPath := getenv("SHELLINK_DB")
@@ -160,6 +149,85 @@ func LoadFrom(getenv func(string) string, goos string) (Config, error) {
 		EditTimeoutMS:        intEnvDefault(getenv, "SHELLINK_EDIT_TIMEOUT_MS", 25_000),
 		SSHReadyTimeoutMS:    intEnvDefault(getenv, "SHELLINK_SSH_READY_TIMEOUT_MS", 30_000),
 	}, nil
+}
+
+// resolveDataHome picks the directory that keeps Shellink state (database,
+// master key, logs, MCP settings).
+//
+// The per-user profile directory is only a convention. The executable may be
+// copied to another drive, unpacked from a portable archive or started on a
+// machine where %APPDATA% is locked down, so:
+//   - an explicit SHELLINK_HOME always wins;
+//   - otherwise the per-user default is used, as long as it is writable;
+//   - when it is not writable the state moves next to the executable instead,
+//     with a warning, so the app still starts.
+//
+// The portable folder must never take precedence merely because it exists:
+// that silently switches the database, so a user who unzips the binaries into
+// a new folder would find an empty session list while the real history stayed
+// behind in the old location. Choose it explicitly with SHELLINK_HOME instead.
+func resolveDataHome(getenv func(string) string, goos, userHome string) (string, error) {
+	return resolveDataHomeWith(getenv, goos, userHome, portableDataHome())
+}
+
+// resolveDataHomeWith is resolveDataHome with the portable fallback injected so
+// the precedence rules can be tested without writing next to the test binary.
+func resolveDataHomeWith(getenv func(string) string, goos, userHome, portable string) (string, error) {
+	if explicit := getenv("SHELLINK_HOME"); explicit != "" {
+		return explicit, nil
+	}
+	fallback, err := defaultDataHome(getenv, goos, userHome)
+	if err != nil {
+		return "", err
+	}
+	if writableDirectory(fallback) {
+		return fallback, nil
+	}
+	if portable == "" || !writableDirectory(portable) {
+		return "", fmt.Errorf("no writable data directory: %s cannot be created (point SHELLINK_HOME at a writable folder)", fallback)
+	}
+	fmt.Fprintf(os.Stderr, "Shellink: %s is not writable, keeping data in %s\n", fallback, portable)
+	return portable, nil
+}
+
+func defaultDataHome(getenv func(string) string, goos, userHome string) (string, error) {
+	if goos != "windows" {
+		return filepath.Join(userHome, ".Shellink"), nil
+	}
+	base := getenv("APPDATA")
+	if base == "" {
+		resolved, err := os.UserConfigDir()
+		if err != nil {
+			return "", err
+		}
+		base = resolved
+	}
+	return filepath.Join(base, "Shellink"), nil
+}
+
+// portableDataHome is the fallback folder beside the executable. It is only
+// used when the per-user directory cannot be written, which is the case for a
+// locked-down %APPDATA% or a copy running from a read-only location.
+func portableDataHome() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(executable), "shellink-data")
+}
+
+func writableDirectory(path string) bool {
+	if err := os.MkdirAll(path, 0700); err != nil {
+		return false
+	}
+	probe, err := os.CreateTemp(path, ".shellink-probe-*")
+	if err != nil {
+		return false
+	}
+	name := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(name)
+	return true
 }
 
 func numericUID() string {

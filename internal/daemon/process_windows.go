@@ -19,7 +19,7 @@ func startDetachedPlatform(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	logFile, err := prepareLog(cfg.LogPath)
+	logFile, err := prepareLogWithFallback(cfg.LogPath)
 	if err != nil {
 		return err
 	}

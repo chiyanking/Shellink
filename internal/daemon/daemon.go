@@ -54,6 +54,29 @@ func LogTail(path string, lines int) string {
 
 func startDetached(cfg config.Config) error { return startDetachedPlatform(cfg) }
 
+// prepareLogWithFallback opens the configured log file and falls back to the OS
+// temporary directory when that path cannot be written.
+//
+// A daemon that cannot write its log is still able to serve the UI, so failing
+// the whole start just because the log file is locked (antivirus, a leftover
+// handle, a read-only data directory) only produces an opaque "Access is
+// denied" with no way forward. Logging to the temp directory keeps the app
+// usable and `server logs` still has something to show.
+func prepareLogWithFallback(path string) (*os.File, error) {
+	file, err := prepareLog(path)
+	if err == nil {
+		return file, nil
+	}
+	fallback := filepath.Join(os.TempDir(), "shellink.log")
+	if filepath.Clean(fallback) == filepath.Clean(path) {
+		return nil, err
+	}
+	if alternative, altErr := prepareLog(fallback); altErr == nil {
+		return alternative, nil
+	}
+	return nil, err
+}
+
 func prepareLog(path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
