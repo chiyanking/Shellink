@@ -1,8 +1,5 @@
 node_modules/
 dist/
-# Generated Web UI embedded by the Go build; keep the directory for go:embed.
-/internal/httpapi/assets/*
-!/internal/httpapi/assets/.gitkeep
 coverage/
 *.log
 .DS_Store

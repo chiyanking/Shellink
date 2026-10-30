@@ -1,22 +1,16 @@
 package httpapi
 
 import (
-	"embed"
 	"io/fs"
 	"net/http"
 	"path"
 	"strings"
+
+	webui "shellink/web"
 )
 
-//go:embed all:assets
-var embeddedUI embed.FS
-
 func embeddedUIAssets() (http.Handler, bool) {
-	marker, err := fs.ReadFile(embeddedUI, "assets/complete.txt")
-	if err != nil || strings.TrimSpace(string(marker)) != "ready" {
-		return nil, false
-	}
-	root, err := fs.Sub(embeddedUI, "assets")
+	root, err := webui.Assets()
 	if err != nil {
 		return nil, false
 	}
