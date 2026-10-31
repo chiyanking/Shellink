@@ -16,7 +16,6 @@ import {
   PanelsTopLeft,
   Plus,
   Radio,
-  Server,
   ShieldCheck,
   SquareSplitHorizontal,
   Terminal,
@@ -424,13 +423,11 @@ function SessionInspector() {
 export default function Workspace() {
   const {
     selectedSession,
-    connections,
     sessions,
     tabs,
     inspector,
     split,
     openModal,
-    openSession,
     navigate,
   } = useDesign()
   const otherSession = sessions.find(
@@ -464,49 +461,6 @@ export default function Workspace() {
           <div className={cn('terminal-panes', split && 'is-split')}>
             <TerminalPanel session={selectedSession} />
             {split && otherSession && <TerminalPanel session={otherSession} secondary />}
-          </div>
-          <section className="recent-sessions">
-            <div className="recent-heading">
-              <h2>最近会话</h2>
-              <button className="text-link subtle" onClick={() => navigate('sessions')}>
-                全部会话
-                <ArrowRight size={12} />
-              </button>
-            </div>
-            <div className="recent-session-grid">
-              {sessions
-                .filter((item) => item.status !== 'ended')
-                .slice(0, 4)
-                .map((session) => {
-                  const connection = connections.find((item) => item.id === session.connectionId) ?? emptyConnection
-                  return (
-                    <button
-                      key={session.id}
-                      className="recent-session"
-                      onClick={() => openSession(session.id)}
-                    >
-                      <span className={cn('connection-icon', `color-${connection.color}`)}>
-                        <Server size={16} />
-                      </span>
-                      <div>
-                        <strong>{session.name}</strong>
-                        <span>
-                          {connection.name} · {session.client}
-                        </span>
-                      </div>
-                      <span className="recent-state">
-                        <span className="status-dot" />
-                        {sessionStatus[session.status].label}
-                      </span>
-                      <ArrowUpRight size={14} className="subtle" />
-                    </button>
-                  )
-                })}
-            </div>
-          </section>
-          <div className="workspace-footnote">
-            <ShieldCheck size={13} />
-            <span>收起标签仅关闭视图；结束会话请前往会话管理。</span>
           </div>
         </div>
         {inspector && <SessionInspector />}
