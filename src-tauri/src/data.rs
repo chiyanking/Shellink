@@ -1,8 +1,11 @@
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::{Aead, OsRng, rand_core::RngCore}};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
-use std::{path::PathBuf, sync::Mutex};
+use sha2::{Digest, Sha256};
+use std::{fs, path::PathBuf, sync::Mutex};
 
-pub struct DataStore { conn: Mutex<Connection> }
+pub struct DataStore { conn: Mutex<Connection>, key: [u8; 32] }
 
 impl DataStore {
     pub fn open() -> Result<Self, String> {
@@ -12,7 +15,8 @@ impl DataStore {
         });
         let conn = Connection::open(&path).map_err(|e| format!("打开数据库失败: {e}"))?;
         conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
-        Ok(Self { conn: Mutex::new(conn) })
+        let key = load_master_key(&path)?;
+        Ok(Self { conn: Mutex::new(conn), key })
     }
     pub fn profiles(&self, id: Option<&str>) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
@@ -36,24 +40,54 @@ impl DataStore {
         let mut out=Vec::new(); for row in rows { out.push(row.map_err(|e|e.to_string())?); } Ok(Value::Array(out))
     }
     pub fn profile_create(&self, p: &Value) -> Result<Value, String> {
-        if p.get("password").is_some() || p.get("privateKey").is_some() || p.get("passphrase").is_some() { return Err("凭证写入仍由迁移桥接处理".into()); }
         let name = p.get("name").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or("name must be a non-empty string")?;
         let id = format!("rust-{}", now()); let t = now();
+        let password = self.encrypt_field(p, "password")?;
+        let private_key = self.encrypt_field(p, "privateKey")?;
+        let passphrase = self.encrypt_field(p, "passphrase")?;
         let conn = self.conn.lock().unwrap();
-        conn.execute("INSERT INTO profiles (id,name,unique_id,connect_type,command,host,port,username,auth_type,term,cols,rows,prompt_regex,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            rusqlite::params![id,name,p.get("uniqueId").and_then(Value::as_str),p.get("connectType").and_then(Value::as_str).unwrap_or("ssh"),p.get("command").and_then(Value::as_str),p.get("host").and_then(Value::as_str).unwrap_or(""),p.get("port").and_then(Value::as_i64).unwrap_or(22),p.get("username").and_then(Value::as_str).unwrap_or(""),p.get("authType").and_then(Value::as_str).unwrap_or("password"),p.get("term").and_then(Value::as_str).unwrap_or("xterm-256color"),p.get("cols").and_then(Value::as_i64).unwrap_or(160),p.get("rows").and_then(Value::as_i64).unwrap_or(42),p.get("promptRegex").and_then(Value::as_str),t,t]).map_err(|e| e.to_string())?;
+        conn.execute("INSERT INTO profiles (id,name,unique_id,connect_type,command,host,port,username,auth_type,encrypted_password,encrypted_private_key,encrypted_passphrase,term,cols,rows,prompt_regex,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            rusqlite::params![id,name,p.get("uniqueId").and_then(Value::as_str),p.get("connectType").and_then(Value::as_str).unwrap_or("ssh"),p.get("command").and_then(Value::as_str),p.get("host").and_then(Value::as_str).unwrap_or(""),p.get("port").and_then(Value::as_i64).unwrap_or(22),p.get("username").and_then(Value::as_str).unwrap_or(""),p.get("authType").and_then(Value::as_str).unwrap_or("password"),password,private_key,passphrase,p.get("term").and_then(Value::as_str).unwrap_or("xterm-256color"),p.get("cols").and_then(Value::as_i64).unwrap_or(160),p.get("rows").and_then(Value::as_i64).unwrap_or(42),p.get("promptRegex").and_then(Value::as_str),t,t]).map_err(|e| e.to_string())?;
         drop(conn); self.profiles(Some(&id))
     }
     pub fn profile_update(&self, id: &str, p: &Value) -> Result<Value, String> {
-        if p.get("password").is_some() || p.get("privateKey").is_some() || p.get("passphrase").is_some() { return Err("凭证写入仍由迁移桥接处理".into()); }
         let conn = self.conn.lock().unwrap();
-        let changed = conn.execute("UPDATE profiles SET name=COALESCE(?,name),unique_id=COALESCE(?,unique_id),connect_type=COALESCE(?,connect_type),command=COALESCE(?,command),host=COALESCE(?,host),port=COALESCE(?,port),username=COALESCE(?,username),auth_type=COALESCE(?,auth_type),term=COALESCE(?,term),cols=COALESCE(?,cols),rows=COALESCE(?,rows),prompt_regex=COALESCE(?,prompt_regex),updated_at=? WHERE id=?", rusqlite::params![p.get("name").and_then(Value::as_str),p.get("uniqueId").and_then(Value::as_str),p.get("connectType").and_then(Value::as_str),p.get("command").and_then(Value::as_str),p.get("host").and_then(Value::as_str),p.get("port").and_then(Value::as_i64),p.get("username").and_then(Value::as_str),p.get("authType").and_then(Value::as_str),p.get("term").and_then(Value::as_str),p.get("cols").and_then(Value::as_i64),p.get("rows").and_then(Value::as_i64),p.get("promptRegex").and_then(Value::as_str),now(),id]).map_err(|e| e.to_string())?;
+        let changed = conn.execute("UPDATE profiles SET name=COALESCE(?,name),unique_id=COALESCE(?,unique_id),connect_type=COALESCE(?,connect_type),command=COALESCE(?,command),host=COALESCE(?,host),port=COALESCE(?,port),username=COALESCE(?,username),auth_type=COALESCE(?,auth_type),encrypted_password=CASE WHEN ? THEN ? ELSE encrypted_password END,encrypted_private_key=CASE WHEN ? THEN ? ELSE encrypted_private_key END,encrypted_passphrase=CASE WHEN ? THEN ? ELSE encrypted_passphrase END,term=COALESCE(?,term),cols=COALESCE(?,cols),rows=COALESCE(?,rows),prompt_regex=COALESCE(?,prompt_regex),updated_at=? WHERE id=?", rusqlite::params![p.get("name").and_then(Value::as_str),p.get("uniqueId").and_then(Value::as_str),p.get("connectType").and_then(Value::as_str),p.get("command").and_then(Value::as_str),p.get("host").and_then(Value::as_str),p.get("port").and_then(Value::as_i64),p.get("username").and_then(Value::as_str),p.get("authType").and_then(Value::as_str),p.get("password").is_some(),self.encrypt_field(p,"password")?,p.get("privateKey").is_some(),self.encrypt_field(p,"privateKey")?,p.get("passphrase").is_some(),self.encrypt_field(p,"passphrase")?,p.get("term").and_then(Value::as_str),p.get("cols").and_then(Value::as_i64),p.get("rows").and_then(Value::as_i64),p.get("promptRegex").and_then(Value::as_str),now(),id]).map_err(|e| e.to_string())?;
         if changed == 0 { return Err("Profile not found".into()); } drop(conn); self.profiles(Some(id))
+    }
+    fn encrypt_field(&self, p: &Value, name: &str) -> Result<Option<String>, String> {
+        match p.get(name) { None | Some(Value::Null) => Ok(None), Some(v) => { let s=v.as_str().ok_or_else(|| format!("{name} must be a string"))?; if s.is_empty() { return Ok(None); } encrypt(&self.key, s).map(Some) } }
     }
     pub fn profile_delete(&self, id: &str) -> Result<Value, String> { let c=self.conn.lock().unwrap(); c.execute("DELETE FROM profiles WHERE id=?",[id]).map_err(|e|e.to_string())?; Ok(json!({"ok":true})) }
 }
 
 fn now() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64 }
+
+fn load_master_key(db: &PathBuf) -> Result<[u8; 32], String> {
+    if let Ok(raw) = std::env::var("SHELLINK_MASTER_KEY") { return decode_key(&raw); }
+    let home = db.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let file = home.join("master.key");
+    if let Ok(raw) = fs::read_to_string(file) { return decode_key(raw.trim()); }
+    let mut h = Sha256::new(); h.update(b"shellink-insecure-default-key"); Ok(h.finalize().into())
+}
+fn decode_key(raw: &str) -> Result<[u8; 32], String> { if raw.len()!=64 { return Err("master key must be 32 bytes".into()); } let mut out=[0u8;32]; for (i, pair) in raw.as_bytes().chunks_exact(2).enumerate() { out[i]=hex_nibble(pair[0]).and_then(|a|hex_nibble(pair[1]).map(|b|a*16+b)).ok_or("SHELLINK_MASTER_KEY must be hex")?; } Ok(out) }
+fn hex_nibble(c: u8) -> Option<u8> { match c { b'0'..=b'9'=>Some(c-b'0'),b'a'..=b'f'=>Some(c-b'a'+10),b'A'..=b'F'=>Some(c-b'A'+10),_=>None } }
+fn encrypt(key: &[u8; 32], plain: &str) -> Result<String, String> { let cipher=Aes256Gcm::new_from_slice(key).map_err(|e|e.to_string())?; let mut nonce=[0u8;12]; OsRng.fill_bytes(&mut nonce); let sealed=cipher.encrypt(Nonce::from_slice(&nonce),plain.as_bytes()).map_err(|e|e.to_string())?; let tag_at=sealed.len()-16; let mut out=Vec::with_capacity(sealed.len()+12); out.extend_from_slice(&nonce); out.extend_from_slice(&sealed[tag_at..]); out.extend_from_slice(&sealed[..tag_at]); Ok(STANDARD.encode(out)) }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn decrypts_go_secretbox_vector() {
+        let mut h = Sha256::new(); h.update(b"interop-key");
+        let key: [u8; 32] = h.finalize().into();
+        let raw = STANDARD.decode("BwcHBwcHBwcHBwcHuDosXAIoo7RWmWgXfiEk7bukxlTc1XCBE6MDCfY=").unwrap();
+        let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let nonce = Nonce::from_slice(&raw[..12]);
+        let mut sealed = raw[28..].to_vec(); sealed.extend_from_slice(&raw[12..28]);
+        assert_eq!(String::from_utf8(cipher.decrypt(nonce, sealed.as_ref()).unwrap()).unwrap(), "secret-中文");
+    }
+}
 
 fn row_profile(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     Ok(json!({"id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"uniqueId":r.get::<_,Option<String>>(2)?,"connectType":r.get::<_,String>(3)?,"command":r.get::<_,Option<String>>(4)?,"host":r.get::<_,String>(5)?,"port":r.get::<_,i64>(6)?,"username":r.get::<_,String>(7)?,"authType":r.get::<_,String>(8)?,"hasPassword":r.get::<_,Option<String>>(9)?.is_some(),"hasPrivateKey":r.get::<_,Option<String>>(10)?.is_some(),"term":r.get::<_,String>(11)?,"cols":r.get::<_,i64>(12)?,"rows":r.get::<_,i64>(13)?,"promptRegex":r.get::<_,Option<String>>(14)?,"createdAt":r.get::<_,i64>(15)?,"updatedAt":r.get::<_,i64>(16)?}))
