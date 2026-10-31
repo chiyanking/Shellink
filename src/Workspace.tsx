@@ -218,6 +218,14 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           <Badge>{connection.type === 'Local' ? 'ZSH' : 'SSH'}</Badge>
         </div>
         <div className="terminal-session-meta">
+          <div className={cn('terminal-header-notice', manual && 'is-manual')}>
+            {session.status === 'ended' ? <div><History size={13} /><span>会话已结束 · {session.result} · 终端输出已保留</span></div> : <>
+              <div>
+                {manual ? <Keyboard size={13} /> : <Radio size={13} />}
+                <span>{manual ? '你正在控制终端 · AI 写入已暂停' : 'AI 正在使用此终端，你可以随时接管。'}</span>
+              </div>
+            </>}
+          </div>
           <div className="terminal-control" role="group" aria-label="控制权模式">
             <span className="terminal-meta-label">控制权</span>
             <button
@@ -260,20 +268,6 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
       </div>
       <div hidden={bottomTab !== 'terminal'}><TerminalContent session={session} /></div>
       {bottomTab === 'files' && <div className="terminal-files empty-state"><FolderOpen size={22} /><h3>文件浏览不可用</h3><p>当前后台协议未提供目录浏览接口。</p></div>}
-      <div className={cn('terminal-input-notice', manual && 'is-manual')}>
-        {session.status === 'ended' ? <div><History size={14} /><span>会话已结束 · {session.result} · 终端输出已保留</span></div> : <>
-        <div>
-          {manual ? <Keyboard size={14} /> : <Radio size={14} />}
-          <span>
-            {manual ? '你正在控制终端 · AI 写入已暂停' : 'AI 正在使用此终端，你可以随时接管。'}
-          </span>
-        </div>
-        <button onClick={() => setManual(!manual)}>
-          {manual ? '交还 AI' : '手动接管'}
-          <ArrowRight size={12} />
-        </button>
-        </>}
-      </div>
       <div className="terminal-bottom">
         <div className="terminal-bottom-tabs">
           <button

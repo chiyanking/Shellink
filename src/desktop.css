@@ -1077,6 +1077,40 @@ select {
   flex: 1 1 auto;
   justify-content: flex-end;
 }
+.terminal-header-notice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  max-width: min(420px, 34vw);
+  border: 0;
+  background: transparent;
+  border-radius: 5px;
+  padding: 4px 7px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+.terminal-header-notice > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.terminal-header-notice > div > svg {
+  color: var(--primary-text);
+  flex-shrink: 0;
+}
+.terminal-header-notice > div > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-header-notice.is-manual {
+  background: var(--amber-soft);
+}
+.terminal-header-notice.is-manual > div > svg {
+  color: var(--amber);
+}
 .terminal-meta-label {
   color: var(--subtle-foreground);
   font-size: 8px;
@@ -1299,45 +1333,6 @@ select {
   height: 13px;
   background: var(--terminal-cursor);
   opacity: 0.8;
-}
-.terminal-input-notice {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: space-between;
-  margin: 0 13px 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 5px;
-  padding: 9px 10px;
-  font-size: 10px;
-  color: var(--muted-foreground);
-}
-.terminal-input-notice > div {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.terminal-input-notice > div > svg {
-  color: var(--primary-text);
-}
-.terminal-input-notice > button {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--foreground);
-  font-size: 9px;
-  white-space: nowrap;
-}
-.terminal-input-notice.is-manual {
-  border-color: color-mix(in srgb, var(--amber) 40%, var(--border));
-  background: var(--amber-soft);
-}
-.terminal-input-notice.is-manual > div > svg {
-  color: var(--amber);
 }
 .terminal-bottom {
   display: flex;
@@ -2953,15 +2948,10 @@ select {
   .terminal-task-note time {
     margin-left: 0;
   }
-  .terminal-input-notice {
-    flex-wrap: wrap;
-    margin-left: 9px;
-    margin-right: 9px;
-    padding: 9px;
-    gap: 6px;
-  }
-  .terminal-input-notice > button {
-    margin-left: 21px;
+  .terminal-header-notice {
+    flex: 1 1 100%;
+    max-width: none;
+    order: 1;
   }
   .terminal-bottom > span:nth-child(2) {
     display: none;
