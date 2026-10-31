@@ -37,6 +37,8 @@ type Profile struct {
 }
 
 type SessionRecord struct {
+	Name        string  `json:"name"`
+	Source      string  `json:"source"`
 	ID          string  `json:"id"`
 	ProfileID   string  `json:"profileId"`
 	ProfileName string  `json:"profileName"`
@@ -152,6 +154,12 @@ CREATE INDEX IF NOT EXISTS idx_history_session_seq ON history_chunks(session_id,
 		return err
 	}
 	if err := s.ensureColumn("history_chunks", "internal", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("sessions", "name", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("sessions", "source", "TEXT NOT NULL DEFAULT 'unknown'"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("profiles", "unique_id", "TEXT"); err != nil {
@@ -270,7 +278,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, r.ID, r.ProfileID, r.ProfileName, r.Target,
 }
 
 func (s *Store) Sessions() ([]SessionRecord, error) {
-	rows, err := s.DB.Query(`SELECT id, profile_id, profile_name, target, state, mode, cols, rows, created_at, closed_at, close_reason, exit_code
+	rows, err := s.DB.Query(`SELECT id, profile_id, profile_name, target, state, mode, cols, rows, created_at, closed_at, close_reason, exit_code, name, source
 FROM sessions ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -279,7 +287,7 @@ FROM sessions ORDER BY created_at`)
 	var result []SessionRecord
 	for rows.Next() {
 		var r SessionRecord
-		if err = rows.Scan(&r.ID, &r.ProfileID, &r.ProfileName, &r.Target, &r.State, &r.Mode, &r.Cols, &r.Rows, &r.CreatedAt, &r.ClosedAt, &r.CloseReason, &r.ExitCode); err != nil {
+		if err = rows.Scan(&r.ID, &r.ProfileID, &r.ProfileName, &r.Target, &r.State, &r.Mode, &r.Cols, &r.Rows, &r.CreatedAt, &r.ClosedAt, &r.CloseReason, &r.ExitCode, &r.Name, &r.Source); err != nil {
 			return nil, err
 		}
 		result = append(result, r)
@@ -289,8 +297,8 @@ FROM sessions ORDER BY created_at`)
 
 func (s *Store) Session(id string) (SessionRecord, error) {
 	var r SessionRecord
-	err := s.DB.QueryRow(`SELECT id, profile_id, profile_name, target, state, mode, cols, rows, created_at, closed_at, close_reason, exit_code
-FROM sessions WHERE id=?`, id).Scan(&r.ID, &r.ProfileID, &r.ProfileName, &r.Target, &r.State, &r.Mode, &r.Cols, &r.Rows, &r.CreatedAt, &r.ClosedAt, &r.CloseReason, &r.ExitCode)
+	err := s.DB.QueryRow(`SELECT id, profile_id, profile_name, target, state, mode, cols, rows, created_at, closed_at, close_reason, exit_code, name, source
+FROM sessions WHERE id=?`, id).Scan(&r.ID, &r.ProfileID, &r.ProfileName, &r.Target, &r.State, &r.Mode, &r.Cols, &r.Rows, &r.CreatedAt, &r.ClosedAt, &r.CloseReason, &r.ExitCode, &r.Name, &r.Source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionRecord{}, ErrNotFound
 	}
@@ -449,5 +457,10 @@ func (s *Store) InsertWebhook(w Webhook) error {
 
 func (s *Store) DeleteWebhook(id string) error {
 	_, err := s.DB.Exec("DELETE FROM webhooks WHERE id=?", id)
+	return err
+}
+
+func (s *Store) UpdateSessionMetadata(id, name, source string) error {
+	_, err := s.DB.Exec("UPDATE sessions SET name=?, source=? WHERE id=?", name, source, id)
 	return err
 }

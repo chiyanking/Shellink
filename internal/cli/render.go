@@ -77,7 +77,7 @@ func renderObject(value map[string]any, indent string) string {
 				continue
 			}
 			// One field under one key is not worth a block of its own:
-			// "webui.url  http://..." keeps the eye on a single line.
+			// "service.url  http://..." keeps the eye on a single line.
 			if only, nested, ok := singleScalar(typed); ok {
 				lines = append(lines, fmt.Sprintf("%s%s.%s  %s", indent, keyText(key), only, renderField(only, nested, indent+"  ")))
 				continue
@@ -304,7 +304,7 @@ func cellString(key, value string) string {
 		return cyan(text)
 	case "status":
 		return statusText(text)
-	case "url", "webui", "webuiurl":
+	case "url", "httpurl":
 		return paint(ansiBlue, text)
 	}
 	if looksLikeURL(text) {

@@ -8,8 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,12 +25,10 @@ type Server struct {
 	rpc      *rpc.Dispatcher
 	sessions *sessions.Manager
 	webhooks *webhooks.Service
-	bus      *sessions.Bus
-	assets   http.Handler
 }
 
-func New(cfg config.Config, dispatcher *rpc.Dispatcher, manager *sessions.Manager, hooks *webhooks.Service, bus *sessions.Bus) *Server {
-	return &Server{cfg: cfg, rpc: dispatcher, sessions: manager, webhooks: hooks, bus: bus, assets: uiAssets()}
+func New(cfg config.Config, dispatcher *rpc.Dispatcher, manager *sessions.Manager, hooks *webhooks.Service) *Server {
+	return &Server{cfg: cfg, rpc: dispatcher, sessions: manager, webhooks: hooks}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -84,12 +80,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/shellink/mcp", s.mcpHTTP)
 	mux.HandleFunc("GET /shellink/agent.md", s.agentDoc)
 	mux.HandleFunc("GET /shellink/llms.txt", s.agentDoc)
-	mux.HandleFunc("GET /shellink/ui", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/shellink/ui/", http.StatusTemporaryRedirect)
-	})
-	mux.Handle("/shellink/ui/", http.StripPrefix("/shellink/ui/", s.assets))
-	mux.HandleFunc("GET /shellink/ws/sessions/{id}", s.terminalWebSocket)
-	mux.HandleFunc("GET /shellink/ws/events", s.eventsWebSocket)
 	return logRequests(s.cors(s.auth(mux)))
 }
 
@@ -525,38 +515,4 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
-}
-
-func uiAssets() http.Handler {
-	if embedded, ok := embeddedUIAssets(); ok {
-		return embedded
-	}
-	candidates := []string{"web/dist", "../web/dist", filepath.Join(filepath.Dir(os.Args[0]), "web", "dist")}
-	if executable, err := exec.LookPath(os.Args[0]); err == nil {
-		if abs, err := filepath.Abs(executable); err == nil {
-			candidates = append(candidates, filepath.Join(filepath.Dir(abs), "web", "dist"))
-		}
-	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(filepath.Join(candidate, "index.html")); err == nil && !info.IsDir() {
-			root := http.Dir(candidate)
-			files := http.FileServer(root)
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				clean := filepath.Clean("/" + r.URL.Path)
-				if file, err := root.Open(clean); err == nil {
-					file.Close()
-					files.ServeHTTP(w, r)
-					return
-				}
-				if filepath.Ext(clean) != "" {
-					http.NotFound(w, r)
-					return
-				}
-				http.ServeFile(w, r, filepath.Join(candidate, "index.html"))
-			})
-		}
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "Shellink Web UI assets were not found", http.StatusNotFound)
-	})
 }

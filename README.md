@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="web/public/shellink-logo.png" alt="Shellink logo" width="112" />
+<img src="app-icon.svg" alt="Shellink logo" width="112" />
 
 # Shellink
 
@@ -14,7 +14,7 @@
 
 </div>
 
-Shellink runs SSH or command-based terminal sessions in a local daemon. The CLI, browser console, and automation tools share those sessions, so work can continue after a client exits. Shellink provides session state, history auditing, file transfer, remote editing, a built-in MCP server, and controls for handing a terminal between automation and a person.
+Shellink runs SSH or command-based terminal sessions in a local daemon. The CLI, MCP clients, and Tauri Desktop share those sessions, so work can continue after a client exits. Desktop bundles the Go core and connects through local RPC; it provides session controls, terminal replay/live output, connection management, MCP configuration, Webhook messages, and raw session history.
 
 > **Security:** A command profile runs its configured command with the daemon user's permissions. Only use trusted commands and scripts. The HTTP API listens on localhost by default. Before allowing network access, set a strong `SHELLINK_TOKEN` and put the service behind TLS.
 
@@ -24,8 +24,8 @@ Shellink runs SSH or command-based terminal sessions in a local daemon. The CLI,
 - Keeps terminal sessions alive in the daemon and exposes their state, input/output history, and interactive input.
 - Runs commands synchronously or as pollable jobs, uploads and downloads files through the session, and applies exact remote file replacements.
 - Supports `AUTO` and `MANUAL` session modes so a person can take control for approvals, passwords, or one-time codes.
-- Offers a terminal UI, a browser console, REST and WebSocket APIs, MCP over stdio or HTTP, plus stable `--json` output for automation.
-- Retains closed-session records and terminal transcripts for history auditing. The dashboard lists recently ended sessions with their end times, newest first.
+- Offers an interactive terminal UI, REST integration APIs, MCP over stdio or HTTP, and stable `--json` output for automation. Desktop is the graphical interface and uses the same daemon as CLI and MCP.
+- Retains closed-session records and terminal transcripts for history auditing.
 - Stores profiles and encrypted credentials in SQLite. Standalone builds are available for macOS, Linux, and Windows.
 
 ## Installation
@@ -57,25 +57,24 @@ shellink server status --json
 Requirements:
 
 - Go 1.26 or newer.
-- Node.js 22.19 or newer and npm when rebuilding the Web UI.
+- Node.js 22.19 or newer and npm for Desktop or the optional Go build scripts.
 - OpenSSH Client for SSH sessions.
 
-Build the runtime and embedded Web UI:
+Build the CLI / daemon core without frontend dependencies:
 
 ```sh
 git clone https://github.com/jie123108/Shellink.git
 cd Shellink
-npm install
+go build -o dist/shellink ./cmd/shellink
+```
+
+On Windows, use `-o dist/shellink.exe`. With Node.js installed, the build script selects the executable name for the current platform:
+
+```sh
 npm run build
 ```
 
-The executable is written to `dist/shellink` or `dist/shellink.exe`. Generated Web UI files stay in `web/dist/`, which is ignored by Git. Run `npm run build` after a fresh checkout or Web UI changes to generate and embed them. The build script enables the `embedui` build tag automatically. Once those assets are present locally, the Go binary can also be built directly:
-
-```sh
-go build -tags=embedui -o dist/shellink ./cmd/shellink
-```
-
-Without the `embedui` tag, Go development and tests work without frontend build output; the server loads `web/dist/` from disk when available.
+The Go binary contains no browser UI. Build Desktop separately with `npm ci` followed by `npm run desktop:build`; native packaging requires Rust and the [Tauri system dependencies](https://tauri.app/start/prerequisites/). The Tauri package builds and bundles a target-matched Go core. The old browser launcher and its Windows packaging script have been removed.
 
 Cross-compile a specific target or all supported targets:
 
@@ -85,6 +84,12 @@ npm run build:binary:all
 ```
 
 ## Quick start
+
+### Desktop
+
+The [desktop project](docs/desktop-development.md) uses React and Tauri v2. Run `npm run desktop:dev` for the native window or `npm run desktop:build` to package it. The browser Vite server is for frontend development and does not provide backend RPC. The Vue browser console and dedicated DeepSeek Harness adapter have been removed; external AI clients use CLI or MCP.
+
+### CLI and daemon
 
 Start the user-level daemon. Resource commands also start it automatically when needed.
 
@@ -122,7 +127,7 @@ shellink session exec SESSION_ID --command "echo Shellink is ready" --json
 shellink session history SESSION_ID --since 0 --json
 ```
 
-To open the browser console, visit <http://127.0.0.1:7070/shellink/ui/>. Keep the session open to reuse it; when you want to end it, run `shellink session close SESSION_ID --json`. Closing preserves its record and history.
+Use `shellink cli` for interactive terminal access. Keep the session open to reuse it; when you want to end it, run `shellink session close SESSION_ID --json`. Closing preserves its record and history.
 
 For an SSH profile, set `connectType` to `ssh` and provide `host`, `username`, and optionally `port` (default `22`). Credentials can be supplied in the profile JSON through `--input FILE` or stdin; never pass passwords, private keys, or passphrases as command-line arguments. Profile credentials are encrypted in the local database.
 
@@ -182,11 +187,11 @@ Session states are `CONNECTING`, `OUTPUTTING`, `WAITING_INPUT`, `IDLE`, and `DIS
 
 ### Session lifetime and history
 
-Sessions survive CLI exits and browser disconnects while the daemon is running. Stopping or restarting the daemon ends active sessions; saved records and history remain available.
+Sessions survive CLI and MCP client exits while the daemon is running. Stopping or restarting the daemon ends active sessions; saved records and history remain available.
 
-`session close` ends the terminal process and retains its record. Use `session history SESSION_ID --since 0 --json` or open the session's history audit from the dashboard to review typed commands and program output after it ends. History hides internal transfer payloads by default; add `--include-internal` to inspect them. The history response contains a `cursor`; pass it as `--since` to read the next page.
+`session close` ends the terminal process and retains its record. Use `session history SESSION_ID --since 0 --json` to review typed commands and program output after it ends. History hides internal transfer payloads by default; add `--include-internal` to inspect them. The history response contains a `cursor`; pass it as `--since` to read the next page.
 
-To permanently delete a session record and its history, run `shellink session remove-record SESSION_ID --json`. If that session is still active, this also closes it. The dashboard also offers record deletion and bulk history cleanup.
+To permanently delete a session record and its history, run `shellink session remove-record SESSION_ID --json`. If that session is still active, this also closes it.
 
 ## Agent workflow
 
@@ -198,10 +203,9 @@ shellink agent-doc
 
 A typical workflow is to find a profile, reuse or create a session, check its state, run a command, and inspect output or history. Keep sessions open after completing a task so they can be reused; close them only when the user requests it. Use `--json` for machine-readable results. Wait for `WAITING_INPUT` before sending commands; when a session is in `MANUAL` mode, leave terminal input to the person supervising it.
 
-Shellink includes two optional agent skills in `skills/`:
+The optional agent workflow is documented in [shellink-cli/](shellink-cli/):
 
 - `shellink-cli` documents profile, session, input, transfer, and editing workflows.
-- `shellink-iterm2-import` scans and imports iTerm2 profiles on macOS.
 
 Install a skill with the [skills CLI](https://skills.sh/), for example:
 
@@ -209,7 +213,7 @@ Install a skill with the [skills CLI](https://skills.sh/), for example:
 npx skills add jie123108/Shellink --skill shellink-cli --agent codex
 ```
 
-For DeepSeek Harness, the optional [shellink-dsh adapter](plugin-dsh/README.md) provides tools for commands, jobs, transfers, and remote edits with approval controls. See its [Chinese guide](plugin-dsh/README.zh-CN.md) for setup and configuration.
+DeepSeek Harness and other AI clients use the same CLI or MCP interface; no client-specific adapter is maintained in this repository.
 
 ## MCP integration
 
@@ -230,11 +234,11 @@ Configure an MCP client to launch `shellink mcp`:
 }
 ```
 
-Use the absolute path to the executable if the client cannot find it in `PATH`. The command starts the daemon automatically when needed. Both MCP transports use the daemon's HTTP API, so keep `SHELLINK_HTTP_ENABLED=true`.
+Use the absolute path to the executable if the client cannot find it in `PATH`. The command starts the daemon automatically when needed and calls it over local RPC. MCP stdio works with `SHELLINK_HTTP_ENABLED=false`.
 
 ### Client over HTTP
 
-Open the Web UI's **MCP** page at <http://127.0.0.1:7070/shellink/ui/mcp> to copy the client configuration, view available tools, enable or disable the HTTP endpoint, or regenerate its token. The endpoint is enabled by default and requires its own generated bearer token, including for local requests. Its configuration is stored in `$SHELLINK_HOME/mcp.json`; this token is separate from `SHELLINK_TOKEN`.
+Enable the daemon HTTP service with `SHELLINK_HTTP_ENABLED=true` (the default). The MCP endpoint requires its own generated bearer token, including for local requests. Obtain the client configuration from `GET /shellink/api/mcp/info` on localhost; remote management requires `SHELLINK_TOKEN`. Manage enablement and token rotation through `POST /shellink/api/mcp/config`. Its persisted configuration is stored in `$SHELLINK_HOME/mcp.json`; the MCP token is separate from `SHELLINK_TOKEN`.
 
 For clients that accept an HTTP URL and authorization headers:
 
@@ -244,26 +248,24 @@ For clients that accept an HTTP URL and authorization headers:
     "shellink": {
       "url": "http://127.0.0.1:7070/shellink/mcp",
       "headers": {
-        "Authorization": "Bearer MCP_TOKEN_FROM_WEB_UI"
+        "Authorization": "Bearer MCP_TOKEN"
       }
     }
   }
 }
 ```
 
-The endpoint accepts JSON-RPC 2.0 requests via HTTP POST. Adjust the configuration to your client's format. Use the CLI or DeepSeek Harness adapter for command execution jobs, file transfers, and remote edits.
+The endpoint accepts JSON-RPC 2.0 requests via HTTP POST and dispatches directly to the daemon's business layer. Adjust the configuration to your client's format. Use the CLI for command execution jobs, file transfers, and remote edits until the MCP tool set is expanded.
 
-## Web UI and API
+## HTTP integration API
 
-Packaged builds embed the Vue Web UI and serve it at `/shellink/ui/`. The browser console includes profiles, live terminals, session history auditing, webhook messages, and MCP configuration. HTTP, WebSocket, and health routes use the `/shellink` prefix:
+HTTP remains available for MCP, incoming Webhook callbacks, health checks, and existing REST integrations. Browser pages and their terminal/event WebSocket routes have been removed. Retained routes use the `/shellink` prefix:
 
 | Route | Purpose |
 | --- | --- |
-| `/shellink/ui/` | Browser console |
 | `/shellink/api/*` | Profiles, sessions, history, webhooks, authentication, and MCP configuration |
 | `/shellink/mcp` | MCP over HTTP POST; requires the separate MCP token |
-| `/shellink/ws/sessions/{id}` | Live terminal stream |
-| `/shellink/ws/events` | Session state events |
+| `/shellink/webhook/callback` | Receive external callback messages via POST |
 | `/shellink/healthz` | Liveness check |
 | `/shellink/agent.md`, `/shellink/llms.txt` | Agent command reference |
 
@@ -278,7 +280,7 @@ Shellink reads configuration from environment variables. User data defaults to `
 | `SHELLINK_HOME` | Data directory | Platform-specific path above |
 | `SHELLINK_DB` | SQLite database path | `$SHELLINK_HOME/shellink.db` |
 | `SHELLINK_LOG` | Daemon log path | `$SHELLINK_HOME/shellink.log` |
-| `SHELLINK_HTTP_ENABLED` | Enable HTTP and WebSocket services | `true` |
+| `SHELLINK_HTTP_ENABLED` | Enable MCP HTTP, Webhook callbacks, and REST APIs | `true` |
 | `SHELLINK_HOST` / `SHELLINK_PORT` | HTTP bind address and port | `127.0.0.1:7070` |
 | `SHELLINK_TOKEN` | Token for remote API access | `change-me` |
 | `SHELLINK_REQUIRE_TOKEN_FOR_SENSITIVE_OPS` | Require an API token for sensitive HTTP operations | Automatic: local requests exempt, remote requests require a token |
@@ -301,27 +303,27 @@ Set daemon environment variables before starting it; restart the daemon to apply
 | `cmd/shellink/` | Go executable entry point |
 | `internal/` | Go CLI, daemon, SSH/PTY sessions, storage, protocol, and HTTP API |
 | `internal/mcpserver/` | Shared MCP tools and JSON-RPC implementation for stdio and HTTP |
-| `web/` | Vue Web UI source and Go resource package for embedding the build output |
-| `web/dist/` | Generated Web assets; ignored by Git and embedded directly when packaging |
-| `plugin-dsh/` | Optional TypeScript adapter for DeepSeek Harness |
-| `skills/` | Agent workflow and iTerm2 import skills |
+| `` | React Desktop interface, bundled Go core, and Tauri local RPC bridge |
+| `shellink-cli/` | Agent CLI workflow documentation |
+| `docs/architecture.md` | Architecture, current implementation status, and integration plan |
 
-macOS and Linux clients use a Unix domain socket to reach the daemon. Windows uses an authenticated loopback TCP endpoint. The HTTP API is a separate browser and integration interface.
+macOS and Linux clients use a Unix domain socket to reach the daemon. Windows uses an authenticated loopback TCP endpoint. CLI and MCP stdio use local RPC; MCP HTTP dispatches in-process. The REST API remains an integration interface.
 
 ## Development
 
 ```sh
-npm run dev                 # Go daemon and Vite Web UI
+npm ci                      # Install Desktop dependencies
+npm run dev                 # Desktop interface preview
 npm run dev:server          # Go daemon only
-npm run dev:web             # Vite Web UI only
-npm run build               # Rebuild UI assets and Go executable
+npm run desktop:dev         # Native Desktop window
+npm run build               # Go executable only; no frontend build required
+npm run build       # Desktop type checking and frontend build
+npm run desktop:build       # Native Desktop package for the current OS
 go test ./...
-go test -tags=embedui ./... # Check embedded Web UI after npm run build
 go vet ./...
-npm run test:plugin-dsh     # Optional DeepSeek Harness adapter
 ```
 
-During Web UI development, open <http://localhost:5173/shellink/ui/>. Vite proxies API and WebSocket requests to the daemon on port `7070`.
+Desktop native builds run on the target operating system; build Windows executables on Windows. The Desktop app starts or reuses the local daemon. Session history currently contains raw input and merged PTY output, so it does not claim actor identity, separate stdout/stderr, or command exit codes. Directory browsing, structured operation audit, tray controls, PATH installation, and login startup are not implemented.
 
 ## License
 

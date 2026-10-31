@@ -1,7 +1,0 @@
-- insert:
-    - id: shellink
-      name: shellink-dsh
-      config:
-        autoStartDaemon: true
-    - id: shellink-tools
-      name: shellink-dsh/tools

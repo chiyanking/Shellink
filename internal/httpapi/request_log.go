@@ -1,9 +1,7 @@
 package httpapi
 
 import (
-	"bufio"
 	"log"
-	"net"
 	"net/http"
 	"time"
 )
@@ -52,13 +50,4 @@ func (w *requestLogWriter) Flush() {
 	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
-}
-
-func (w *requestLogWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	hijacker, ok := w.ResponseWriter.(http.Hijacker)
-	if !ok {
-		return nil, nil, http.ErrNotSupported
-	}
-	w.status = http.StatusSwitchingProtocols
-	return hijacker.Hijack()
 }

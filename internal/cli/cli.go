@@ -16,6 +16,7 @@ import (
 	"shellink/internal/client"
 	"shellink/internal/config"
 	"shellink/internal/daemon"
+	"shellink/internal/desktopbridge"
 	"shellink/internal/httpapi"
 	"shellink/internal/protocol"
 	"shellink/internal/rpc"
@@ -116,6 +117,9 @@ func Main(args []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+	if group == "desktop-bridge" {
+		return desktopbridge.Run(cfg, os.Stdin, os.Stdout)
 	}
 	if group == "server" {
 		return handleServer(cfg, action, flags)
@@ -294,7 +298,7 @@ func handleRPC(connection *client.Client, words []string, flags map[string]strin
 		if err != nil {
 			return err
 		}
-		return requestOnlyError(request("sessions.create", map[string]any{"profileId": required(flags["profile"], "--profile"), "cols": cols, "rows": rows}, 0))
+		return requestOnlyError(request("sessions.create", map[string]any{"profileId": required(flags["profile"], "--profile"), "cols": cols, "rows": rows, "source": "cli"}, 0))
 	case "state":
 		return requestOnlyError(request("sessions.state", map[string]any{"id": sid}, 0))
 	case "history":
@@ -576,7 +580,7 @@ func help(topic string) string {
 				{"see whether it is up", "shellink server status"},
 				{"tail the log", "shellink server logs --lines 100"},
 			},
-			[]string{"start/stop/restart are used by the launcher; run serves one process in the foreground."},
+			[]string{"start/stop/restart manage the background daemon; run serves one process in the foreground."},
 		)
 	case "webhook":
 		return commandPage(

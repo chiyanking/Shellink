@@ -1,8 +1,10 @@
 package rpc
 
 import (
+	"strings"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"time"
 
@@ -28,6 +30,7 @@ var Methods = []string{
 	"sessions.upload", "sessions.edit", "sessions.mode", "sessions.resize", "sessions.close",
 	"sessions.removeRecord", "webhooks.list", "webhooks.create", "webhooks.delete",
 	"events.subscribe", "events.unsubscribe",
+	"desktop.info", "mcp.info", "mcp.config", "webhooks.messages", "webhooks.clearMessages", "sessions.rename", "sessions.replay", "sessions.historyChunks",
 }
 
 type EventSink interface {
@@ -52,6 +55,8 @@ func NewDispatcher(cfg config.Config, db *store.Store, profiles *service.Profile
 func (d *Dispatcher) Dispatch(method string, params protocol.Value, sink EventSink) (protocol.Value, error) {
 	fields := protocol.MapValue(params)
 	switch method {
+	case "desktop.info", "mcp.info", "mcp.config", "webhooks.messages", "webhooks.clearMessages", "sessions.rename", "sessions.replay", "sessions.historyChunks":
+		return d.desktopDispatch(method, params)
 	case "system.hello":
 		version, ok := integer(fields, "protocolVersion", 0)
 		if !ok {
@@ -82,10 +87,12 @@ func (d *Dispatcher) Dispatch(method string, params protocol.Value, sink EventSi
 			}
 		}
 		host := d.cfg.Host
-		url := fmt.Sprintf("http://%s:%d", host, d.cfg.Port)
-		var httpURL, ui protocol.Value
+		if host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		var httpURL protocol.Value
 		if d.cfg.HTTPEnabled {
-			httpURL, ui = url, protocol.Object("url", webUIURL(host, d.cfg.Port))
+			httpURL = fmt.Sprintf("http://%s", net.JoinHostPort(host, fmt.Sprint(d.cfg.Port)))
 		}
 		socketPath := d.cfg.SocketPath
 		if d.cfg.PipeName != "" {
@@ -94,7 +101,7 @@ func (d *Dispatcher) Dispatch(method string, params protocol.Value, sink EventSi
 		return protocol.Object("version", Version, "commit", Commit, "protocolVersion", ProtocolVersion,
 			"pid", os.Getpid(), "uptimeSeconds", int64(time.Since(d.started).Seconds()),
 			"socketPath", socketPath, "httpEnabled", d.cfg.HTTPEnabled, "httpUrl", httpURL,
-			"webui", ui, "activeSessions", active), nil
+			"activeSessions", active), nil
 	case "system.stop":
 		go d.stop()
 		return protocol.Object("stopping", true), nil
@@ -142,7 +149,29 @@ func (d *Dispatcher) Dispatch(method string, params protocol.Value, sink EventSi
 		if !ok {
 			return nil, service.Invalid("rows must be an integer")
 		}
-		return d.sessions.Create(profileID, int(cols), int(rows))
+		name := ""
+		if raw, present := fields["name"]; present {
+			var valid bool
+			name, valid = protocol.StringValue(raw)
+			if !valid { return nil, service.Invalid("name must be a string") }
+		}
+		name = strings.TrimSpace(name)
+		if len([]rune(name)) > 80 { return nil, service.Invalid("name must be at most 80 characters") }
+		source := "unknown"
+		if raw, present := fields["source"]; present {
+			var valid bool
+			source, valid = protocol.StringValue(raw)
+			if !valid || (source != "desktop" && source != "cli" && source != "mcp" && source != "unknown") {
+				return nil, service.Invalid("source must be desktop, cli, mcp, or unknown")
+			}
+		}
+		mode := sessions.Auto
+		if raw, present := fields["mode"]; present {
+			value, valid := protocol.StringValue(raw)
+			if !valid || (value != "AUTO" && value != "MANUAL") { return nil, service.Invalid("mode must be AUTO or MANUAL") }
+			mode = sessions.Mode(value)
+		}
+		return d.sessions.CreateWithMetadata(profileID, int(cols), int(rows), name, source, mode)
 	case "sessions.state":
 		id, err := requiredString(fields, "id")
 		if err != nil {
@@ -436,11 +465,4 @@ func normalizeError(err error) error {
 		return app
 	}
 	return service.Internal(err)
-}
-
-func webUIURL(host string, port int) string {
-	if host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	return fmt.Sprintf("http://%s:%d/shellink/ui/", host, port)
 }

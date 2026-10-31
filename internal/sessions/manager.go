@@ -79,6 +79,11 @@ func (m *Manager) CloseAll(reason string) {
 }
 
 func (m *Manager) Create(profileID string, cols, rows int) (protocol.Value, error) {
+	return m.CreateWithMetadata(profileID, cols, rows, "", "unknown", Auto)
+}
+
+// CreateWithMetadata persists metadata before exposing the live session.
+func (m *Manager) CreateWithMetadata(profileID string, cols, rows int, name, source string, mode Mode) (protocol.Value, error) {
 	profile, err := m.db.Profile(profileID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, service.NotFound("Profile not found")
@@ -130,8 +135,8 @@ func (m *Manager) Create(profileID string, cols, rows int) (protocol.Value, erro
 		target = string([]rune(target)[:117]) + "..."
 	}
 	record := store.SessionRecord{
-		ID: id, ProfileID: profile.ID, ProfileName: profile.Name, Target: target,
-		State: string(Connecting), Mode: string(Auto), Cols: cols, Rows: rows, CreatedAt: session.CreatedAt,
+		ID: id, ProfileID: profile.ID, ProfileName: profile.Name, Target: target, Name: name, Source: source,
+		State: string(Connecting), Mode: string(mode), Cols: cols, Rows: rows, CreatedAt: session.CreatedAt,
 	}
 	if err := m.db.InsertSession(record); err != nil {
 		_ = transport.Close()
@@ -153,9 +158,10 @@ func (m *Manager) Create(profileID string, cols, rows int) (protocol.Value, erro
 			}
 		})
 	}
+	session.SetMode(mode)
 	session.Attach(transport)
 	m.bus.Publish(Event{Name: "session.created", Data: protocol.Object("sessionId", id)})
-	return protocol.Object("id", id, "state", string(Connecting), "mode", string(Auto), "target", profileTarget(profile)), nil
+	return protocol.Object("id", id, "state", string(Connecting), "mode", string(mode), "target", profileTarget(profile)), nil
 }
 
 func (m *Manager) sessionCommand(profile store.Profile, sessionID string) (string, []string, map[string]string, string, string, error) {
@@ -262,7 +268,7 @@ func (m *Manager) List() (protocol.Value, error) {
 		}
 		items = append(items, item{value: protocol.Object(
 			"id", record.ID, "profileId", record.ProfileID, "profileName", record.ProfileName,
-			"target", record.Target, "state", string(state), "mode", string(mode),
+			"name", record.Name, "source", record.Source, "target", record.Target, "state", string(state), "mode", string(mode),
 			"cols", record.Cols, "rows", record.Rows, "createdAt", record.CreatedAt,
 			"closedAt", record.ClosedAt, "closeReason", record.CloseReason, "active", active,
 		), active: active, at: at})
@@ -393,6 +399,26 @@ func (m *Manager) RawHistory(id string, maxBytes int, includeInternal bool) (str
 	return result.String(), nil
 }
 
+// DesktopReplay returns output and its cursor from the same database snapshot.
+// Events received while this snapshot is read can safely be deduplicated by seq.
+func (m *Manager) DesktopReplay(id string) (protocol.Value, error) {
+	if _, err := m.db.Session(id); errors.Is(err, store.ErrNotFound) {
+		return nil, service.NotFound("Session not found")
+	} else if err != nil {
+		return nil, service.Internal(err)
+	}
+	m.flushHistory()
+	chunks, err := m.db.AllHistory(id, true)
+	if err != nil { return nil, service.Internal(err) }
+	var output strings.Builder
+	var cursor int64
+	for _, chunk := range chunks {
+		cursor = chunk.Seq
+		if !chunk.Internal { output.WriteString(chunk.DataRaw) }
+	}
+	return protocol.Object("raw", limitTail(output.String(), 512*1024), "cursor", cursor), nil
+}
+
 func (m *Manager) Input(id, text string, appendNewline, manual bool) (protocol.Value, error) {
 	session := m.Get(id)
 	if session == nil {
@@ -489,7 +515,7 @@ func (m *Manager) Close(id string) (protocol.Value, error) {
 
 func (m *Manager) Remove(id string) (protocol.Value, error) {
 	if session := m.Get(id); session != nil {
-		session.Close("Deleted from the Web UI")
+		session.Close("Session record deleted")
 	}
 	if _, err := m.db.Session(id); errors.Is(err, store.ErrNotFound) {
 		if m.Get(id) == nil {

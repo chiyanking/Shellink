@@ -76,7 +76,7 @@ func (r *Runtime) Start() error {
 			return fmt.Errorf("listen for HTTP: %w", err)
 		}
 		r.http = &http.Server{
-			Addr: address, Handler: httpapi.New(r.cfg, r.dispatcher, r.manager, r.webhooks, r.bus).Handler(),
+			Addr: address, Handler: httpapi.New(r.cfg, r.dispatcher, r.manager, r.webhooks).Handler(),
 			ReadHeaderTimeout: 10 * time.Second,
 		}
 	}
@@ -116,7 +116,6 @@ func (r *Runtime) Start() error {
 	log.Printf("[Shellink] Local RPC: %s", address)
 	if r.cfg.HTTPEnabled {
 		log.Printf("[Shellink] HTTP: http://%s", net.JoinHostPort(r.cfg.Host, fmt.Sprint(r.cfg.Port)))
-		log.Printf("[Shellink] Web UI: %s", webUIURL(r.cfg.Host, r.cfg.Port))
 	}
 	return nil
 }
@@ -169,22 +168,19 @@ func (r *Runtime) Close() error {
 	return firstErr
 }
 
-func (r *Runtime) Paths() (socket, webURL string) {
+func (r *Runtime) Paths() (socket, httpURL string) {
 	socket = r.cfg.SocketPath
 	if r.cfg.PipeName != "" {
 		socket = r.cfg.PipeName
 	}
 	if r.cfg.HTTPEnabled {
-		webURL = webUIURL(r.cfg.Host, r.cfg.Port)
+		host := r.cfg.Host
+		if host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		httpURL = fmt.Sprintf("http://%s", net.JoinHostPort(host, fmt.Sprint(r.cfg.Port)))
 	}
 	return
-}
-
-func webUIURL(host string, port int) string {
-	if host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	return fmt.Sprintf("http://%s/shellink/ui/", net.JoinHostPort(host, fmt.Sprint(port)))
 }
 
 func ResolveLogPath(cfg config.Config) string { return filepath.Clean(cfg.LogPath) }

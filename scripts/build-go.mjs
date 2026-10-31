@@ -9,7 +9,6 @@ const run = (command, args, options = {}) => {
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
-run(process.execPath, [process.env.npm_execpath, 'run', 'build', '--workspace=web'])
 mkdirSync(join(root, 'dist'), { recursive: true })
 
 const args = process.argv.slice(2)
@@ -36,7 +35,7 @@ for (const [goos, goarch] of targets) {
   const name = crossTarget
     ? `shellink-${goos}-${arch}${goos === 'windows' ? '.exe' : ''}`
     : `shellink${goos === 'windows' ? '.exe' : ''}`
-  run('go', ['build', '-tags=embedui', '-o', join(root, 'dist', name), './cmd/shellink'], {
+  run('go', ['build', '-o', join(root, 'dist', name), './cmd/shellink'], {
     cwd: root,
     env: { ...process.env, GOOS: goos, GOARCH: goarch },
   })

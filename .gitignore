@@ -30,4 +30,3 @@ master.key
 .backup/
 # build artifacts (delivered binary is not versioned)
 Shellink-Windows-x64/
-launcher/*.exe

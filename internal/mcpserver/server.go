@@ -2,29 +2,26 @@ package mcpserver
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
-	"time"
 
+	"shellink/internal/protocol"
 	"shellink/internal/rpc"
 )
 
-// Server translates MCP (Model Context Protocol) tool calls into requests
-// against the Shellink daemon HTTP API. It is transport agnostic: the same
-// implementation backs the stdio CLI and the daemon's HTTP endpoint.
+// Call invokes the shared daemon business API. The stdio transport uses local
+// RPC; the daemon's HTTP transport dispatches in-process.
+type Call func(method string, params protocol.Value) (protocol.Value, error)
+
+// Server translates MCP tool calls into the shared business API.
 type Server struct {
-	base string
-	http *http.Client
+	call Call
 }
 
-// New returns a Server talking to the given Shellink HTTP API base URL
-// (for example http://127.0.0.1:7070/shellink/api).
-func New(base string) *Server {
-	return &Server{base: strings.TrimRight(base, "/"), http: &http.Client{Timeout: 30 * time.Second}}
+func New(call Call) *Server {
+	return &Server{call: call}
 }
 
 type jsonrpcRequest struct {
@@ -149,70 +146,48 @@ func (s *Server) handle(req jsonrpcRequest) *jsonrpcResponse {
 	}
 }
 
-func (s *Server) api(method, path string, body interface{}) ([]byte, error) {
-	var reader io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, err
-		}
-		reader = bytes.NewReader(b)
-	}
-	req, err := http.NewRequest(method, s.base+path, reader)
+func (s *Server) request(method string, params map[string]any) (string, error) {
+	value, err := s.call(method, protocol.JSONValue(params))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return data, fmt.Errorf("API %s %s -> %d: %s", method, path, resp.StatusCode, string(data))
-	}
-	return data, nil
+	data, err := json.Marshal(protocol.ToJSONValue(value))
+	return string(data), err
 }
 
 func (s *Server) callTool(name string, params map[string]any) (string, error) {
 	switch name {
 	case "shellink_list_profiles":
-		b, err := s.api("GET", "/profiles", nil)
-		return string(b), err
+		return s.request("profiles.list", nil)
 	case "shellink_create_profile":
-		b, err := s.api("POST", "/profiles", params)
-		return string(b), err
+		return s.request("profiles.create", params)
 	case "shellink_list_sessions":
-		b, err := s.api("GET", "/sessions", nil)
-		return string(b), err
+		return s.request("sessions.list", nil)
 	case "shellink_create_session":
-		b, err := s.api("POST", "/sessions", params)
-		return string(b), err
-	case "shellink_session_state":
-		id, _ := params["id"].(string)
-		b, err := s.api("GET", "/sessions/"+id+"/state", nil)
-		return string(b), err
-	case "shellink_read_output":
-		id, _ := params["id"].(string)
-		limit := 2000
-		if v, ok := params["limit"].(float64); ok && v > 0 {
-			limit = int(v)
+		args := make(map[string]any, len(params)+1)
+		for key, value := range params {
+			args[key] = value
 		}
-		b, err := s.api("GET", fmt.Sprintf("/sessions/%s/history?limit=%d&includeInternal=1", id, limit), nil)
+		args["source"] = "mcp"
+		return s.request("sessions.create", args)
+	case "shellink_session_state":
+		return s.request("sessions.state", map[string]any{"id": params["id"]})
+	case "shellink_read_output":
+		limit := params["limit"]
+		if limit == nil {
+			limit = 2000
+		}
+		text, err := s.request("sessions.history", map[string]any{
+			"id": params["id"], "limit": limit, "includeInternal": true,
+		})
 		if err != nil {
 			return "", err
 		}
-		return extractPlain(b), nil
+		return extractPlain([]byte(text)), nil
 	case "shellink_send_input":
-		id, _ := params["id"].(string)
-		text, _ := params["text"].(string)
-		b, err := s.api("POST", "/sessions/"+id+"/input", map[string]any{"text": text})
-		return string(b), err
+		return s.request("sessions.input", map[string]any{"id": params["id"], "text": params["text"]})
 	case "shellink_close_session":
-		id, _ := params["id"].(string)
-		b, err := s.api("POST", "/sessions/"+id+"/close", nil)
-		return string(b), err
+		return s.request("sessions.close", map[string]any{"id": params["id"]})
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)
 	}

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +13,7 @@ import (
 
 	"shellink/internal/client"
 	"shellink/internal/config"
+	"shellink/internal/mcpserver"
 	"shellink/internal/protocol"
 )
 
@@ -77,6 +80,14 @@ func TestRuntimeRPCProfileAndCommandSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer connection.Close()
+	status, err := connection.Request("system.status", protocol.Object(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusFields := protocol.MapValue(status)
+	if _, exists := statusFields["webui"]; exists || statusFields["httpEnabled"] != false || statusFields["httpUrl"] != nil {
+		t.Fatalf("HTTP-disabled status advertises removed or disabled endpoints: %#v", status)
+	}
 	if _, err := connection.Request("system.ping", protocol.Object(), time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +155,59 @@ func TestRuntimeRPCProfileAndCommandSession(t *testing.T) {
 			}
 		})
 	}
-	_, err = connection.Request("sessions.close", protocol.JSONValue(map[string]any{"id": sessionID}), time.Second)
+	// MCP stdio shares this daemon even though no HTTP listener exists. Check
+	// actual history, lifecycle and control errors through its JSON-RPC stream.
+	_, err = connection.Request("sessions.mode", protocol.Object("id", sessionID, "mode", "MANUAL"), time.Second)
 	if err != nil {
 		t.Fatal(err)
+	}
+	mcp := mcpserver.New(func(method string, params protocol.Value) (protocol.Value, error) {
+		return connection.Request(method, params, time.Second)
+	})
+	input := strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shellink_read_output","arguments":{"id":%q}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"shellink_send_input","arguments":{"id":%q,"text":"echo forbidden","manual":true}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"shellink_close_session","arguments":{"id":%q}}}
+`, sessionID, sessionID, sessionID))
+	var output, diagnostics bytes.Buffer
+	if err := mcp.Serve(input, &diagnostics, &output); err != nil {
+		t.Fatal(err)
+	}
+	if diagnostics.Len() != 0 {
+		t.Fatalf("unexpected MCP diagnostics: %s", &diagnostics)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("stdout must contain exactly three MCP responses: %s", &output)
+	}
+	for i, line := range lines {
+		var response struct {
+			ID     int `json:"id"`
+			Result struct {
+				Content []struct{ Text string } `json:"content"`
+				IsError bool                    `json:"isError"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(line), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.ID != i+1 || len(response.Result.Content) != 1 {
+			t.Fatalf("invalid MCP response: %s", line)
+		}
+		text := response.Result.Content[0].Text
+		switch response.ID {
+		case 1:
+			if response.Result.IsError || !strings.Contains(text, "go-runtime-ok") || !strings.Contains(text, "delayed-result") {
+				t.Fatalf("MCP history lost terminal output: %s", line)
+			}
+		case 2:
+			if !response.Result.IsError || !strings.Contains(text, "MANUAL") {
+				t.Fatalf("MCP input bypassed manual control: %s", line)
+			}
+		case 3:
+			if response.Result.IsError || !strings.Contains(text, `"ok":true`) {
+				t.Fatalf("MCP could not close the shared session: %s", line)
+			}
+		}
 	}
 }
