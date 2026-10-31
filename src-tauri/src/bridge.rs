@@ -98,6 +98,7 @@ impl Backend {
 
 #[tauri::command]
 pub async fn core_request(app: AppHandle, state: tauri::State<'_, Arc<Backend>>, method: String, params: Value, timeout_ms: Option<u64>) -> Reply {
+    if matches!(method.as_str(), "mcp.info" | "mcp.config") { if let Some(db)=app.try_state::<Option<crate::data::DataStore>>() { if let Some(db)=db.inner().as_ref() { let value=if method=="mcp.info"{db.mcp_info()}else{db.mcp_config(&params)}; if value.is_ok(){return value;} } } }
     if method == "sessions.state" {
         if let Some(db)=app.try_state::<Option<crate::data::DataStore>>() { if let Some(db)=db.inner().as_ref() { if let Some(id)=params.get("id").and_then(Value::as_str) { if let Ok(value)=db.session_state(id) { return Ok(value); } } } }
     }

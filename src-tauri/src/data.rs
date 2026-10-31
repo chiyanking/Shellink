@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf, sync::Mutex};
 
-pub struct DataStore { conn: Mutex<Connection>, key: [u8; 32] }
+pub struct DataStore { conn: Mutex<Connection>, key: [u8; 32], data_home: PathBuf }
 
 impl DataStore {
     pub fn open() -> Result<Self, String> {
@@ -16,7 +16,7 @@ impl DataStore {
         let conn = Connection::open(&path).map_err(|e| format!("打开数据库失败: {e}"))?;
         conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
         let key = load_master_key(&path)?;
-        Ok(Self { conn: Mutex::new(conn), key })
+        let data_home=path.parent().unwrap_or_else(||std::path::Path::new(".")).to_path_buf(); Ok(Self { conn: Mutex::new(conn), key, data_home })
     }
     pub fn profiles(&self, id: Option<&str>) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
@@ -54,6 +54,8 @@ impl DataStore {
     pub fn add_output(&self, id: &str, text: &str) -> Result<(), String> {
         let c=self.conn.lock().unwrap(); let seq:i64=c.query_row("SELECT COALESCE(MAX(seq),0)+1 FROM history_chunks WHERE session_id=?", [id], |r|r.get(0)).map_err(|e|e.to_string())?; c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,text,0,now()]).map_err(|e|e.to_string()).map(|_|())
     }
+    pub fn mcp_info(&self) -> Result<Value, String> { let path=self.data_home.join("mcp.json"); let mut state=json!({"enabled":true,"token":""}); if let Ok(raw)=std::fs::read_to_string(&path){state=serde_json::from_str(&raw).map_err(|e|e.to_string())?;} if state.get("token").and_then(Value::as_str).unwrap_or("").is_empty(){state["token"]=Value::String(random_token());std::fs::create_dir_all(&self.data_home).map_err(|e|e.to_string())?;std::fs::write(&path,serde_json::to_vec_pretty(&state).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;} let enabled=state.get("enabled").and_then(Value::as_bool).unwrap_or(true);let token=state.get("token").and_then(Value::as_str).unwrap_or("");let url=format!("http://127.0.0.1:{}/shellink/mcp",std::env::var("SHELLINK_PORT").ok().and_then(|v|v.parse::<u16>().ok()).unwrap_or(7070));Ok(json!({"enabled":enabled,"running":false,"httpEnabled":enabled,"url":url,"token":token,"clientConfig":{"mcpServers":{"shellink":{"url":url,"headers":{"Authorization":format!("Bearer {}",token)}}}}})) }
+    pub fn mcp_config(&self, params: &Value) -> Result<Value, String> { let path=self.data_home.join("mcp.json"); let mut state=json!({"enabled":true,"token":random_token()}); if let Ok(raw)=std::fs::read_to_string(&path){state=serde_json::from_str(&raw).map_err(|e|e.to_string())?;} if let Some(enabled)=params.get("enabled").and_then(Value::as_bool){state["enabled"]=Value::Bool(enabled);} if params.get("regenerateToken").and_then(Value::as_bool).unwrap_or(false){state["token"]=Value::String(random_token());}std::fs::create_dir_all(&self.data_home).map_err(|e|e.to_string())?;std::fs::write(&path,serde_json::to_vec_pretty(&state).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;self.mcp_info() }
     pub fn add_input(&self, id: &str, text: &str) -> Result<(), String> { let c=self.conn.lock().unwrap(); let seq:i64=c.query_row("SELECT COALESCE(MAX(seq),0)+1 FROM history_chunks WHERE session_id=?", [id], |r|r.get(0)).map_err(|e|e.to_string())?; c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"input",text,text,0,now()]).map_err(|e|e.to_string()).map(|_|()) }
     pub fn history_chunks(&self, id: &str, since: i64, limit: i64) -> Result<Value, String> { let c=self.conn.lock().unwrap(); let mut s=c.prepare("SELECT id,session_id,seq,direction,data_plain,created_at FROM history_chunks WHERE session_id=? AND seq>? AND internal=0 ORDER BY seq LIMIT ?").map_err(|e|e.to_string())?; let rows=s.query_map(rusqlite::params![id,since,limit],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"sessionId":r.get::<_,String>(1)?,"seq":r.get::<_,i64>(2)?,"direction":r.get::<_,String>(3)?,"plain":r.get::<_,String>(4)?,"createdAt":r.get::<_,i64>(5)?}))).map_err(|e|e.to_string())?; let mut items=Vec::new();let mut cursor=since;for row in rows{let v=row.map_err(|e|e.to_string())?;cursor=v.get("seq").and_then(Value::as_i64).unwrap_or(cursor);items.push(v);}Ok(json!({"items":items,"cursor":cursor,"hasMore":items.len() as i64==limit})) }
     pub fn profile_create(&self, p: &Value) -> Result<Value, String> {
@@ -90,6 +92,7 @@ fn load_master_key(db: &PathBuf) -> Result<[u8; 32], String> {
 }
 fn decode_key(raw: &str) -> Result<[u8; 32], String> { if raw.len()!=64 { return Err("master key must be 32 bytes".into()); } let mut out=[0u8;32]; for (i, pair) in raw.as_bytes().chunks_exact(2).enumerate() { out[i]=hex_nibble(pair[0]).and_then(|a|hex_nibble(pair[1]).map(|b|a*16+b)).ok_or("SHELLINK_MASTER_KEY must be hex")?; } Ok(out) }
 fn hex_nibble(c: u8) -> Option<u8> { match c { b'0'..=b'9'=>Some(c-b'0'),b'a'..=b'f'=>Some(c-b'a'+10),b'A'..=b'F'=>Some(c-b'A'+10),_=>None } }
+fn random_token() -> String { let mut bytes=[0u8;24]; OsRng.fill_bytes(&mut bytes); bytes.iter().map(|b|format!("{:02x}",b)).collect() }
 fn encrypt(key: &[u8; 32], plain: &str) -> Result<String, String> { let cipher=Aes256Gcm::new_from_slice(key).map_err(|e|e.to_string())?; let mut nonce=[0u8;12]; OsRng.fill_bytes(&mut nonce); let sealed=cipher.encrypt(Nonce::from_slice(&nonce),plain.as_bytes()).map_err(|e|e.to_string())?; let tag_at=sealed.len()-16; let mut out=Vec::with_capacity(sealed.len()+12); out.extend_from_slice(&nonce); out.extend_from_slice(&sealed[tag_at..]); out.extend_from_slice(&sealed[..tag_at]); Ok(STANDARD.encode(out)) }
 
 #[cfg(test)]
