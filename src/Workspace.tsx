@@ -280,6 +280,7 @@ function SessionInspector() {
     selected,
     selectedSession,
     inspectSession,
+    notify,
   } = useDesign()
   const [recentChunks, setRecentChunks] = useState<{id:number;seq:number;direction:string;plain:string;createdAt:number}[]>([])
   useEffect(() => {
@@ -382,7 +383,18 @@ function SessionInspector() {
         <dl>
           <div>
             <dt>会话 ID</dt>
-            <dd>{selectedSession.id}</dd>
+            <dd className="inspector-session-id">
+              <code>{selectedSession.id}</code>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="复制 Session ID"
+                title="复制 Session ID"
+                onClick={() => void navigator.clipboard.writeText(selectedSession.id).then(() => notify('已复制会话 ID')).catch(() => notify(selectedSession.id))}
+              >
+                <Copy size={11} />
+              </Button>
+            </dd>
           </div>
           <div>
             <dt>连接方式</dt>

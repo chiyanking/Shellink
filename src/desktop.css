@@ -1695,6 +1695,26 @@ select {
   font-family: var(--font-mono);
   font-size: 8px;
 }
+.inspector-details dd.inspector-session-id {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.inspector-session-id code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inspector-session-id .ui-button {
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+.inspector-session-id .ui-button:hover {
+  color: var(--primary);
+}
 .inspector-details dd.text-green {
   color: var(--green);
   font-family: var(--font-sans);
