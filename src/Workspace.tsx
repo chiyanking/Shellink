@@ -13,7 +13,6 @@ import {
   History,
   Keyboard,
   PanelRightClose,
-  PanelRightOpen,
   PanelsTopLeft,
   Plus,
   Radio,
@@ -417,9 +416,7 @@ export default function Workspace() {
     sessions,
     tabs,
     inspector,
-    setInspector,
     split,
-    setSplit,
     openModal,
     openSession,
     navigate,
@@ -449,31 +446,7 @@ export default function Workspace() {
       </div>
     )
   return (
-    <div className="workspace-page">
-      <PageHeading title="终端工作区" description="连接、执行、协作。让每一次操作清晰可见。">
-        <Button variant="outline" onClick={() => navigate('sessions')}>
-          <PanelsTopLeft size={14} />
-          <span className="compact-label">会话管理</span>
-        </Button>
-        <Hint label={inspector ? '收起会话面板' : '显示会话面板'}>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={inspector ? '收起会话面板' : '显示会话面板'}
-            onClick={() => setInspector(!inspector)}
-          >
-            {inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-          </Button>
-        </Hint>
-        <Button variant="outline" aria-pressed={split} onClick={() => setSplit(!split)}>
-          <SquareSplitHorizontal size={14} />
-          <span className="compact-label">分屏</span>
-        </Button>
-        <Button onClick={() => openModal('session')}>
-          <Plus size={15} />
-          新建会话
-        </Button>
-      </PageHeading>
+    <div className="workspace-page workspace-terminal-page">
       <div className={cn('workspace-grid', !inspector && 'without-inspector')}>
         <div className="workspace-main">
           <div className={cn('terminal-panes', split && 'is-split')}>

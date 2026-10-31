@@ -976,6 +976,7 @@ select {
 }
 .session-tab {
   display: flex;
+  flex: 1 1 0;
   align-items: center;
   gap: 4px;
   color: var(--muted-foreground);
@@ -985,6 +986,7 @@ select {
   margin-bottom: -1px;
   padding: 0 9px 0 14px;
   position: relative;
+  min-width: 0;
 }
 .session-tab.is-active {
   background: var(--terminal);
@@ -1002,6 +1004,7 @@ select {
 }
 .session-tab-main {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 7px;
   border: 0;
@@ -1009,6 +1012,12 @@ select {
   padding: 0;
   min-height: 38px;
   font-size: 11px;
+  min-width: 0;
+}
+.session-tab-main span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .session-tab-close {
   display: flex;
