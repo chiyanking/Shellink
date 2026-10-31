@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Mutex};
 
-pub struct DataStore { conn: Mutex<Connection>, path: PathBuf }
+pub struct DataStore { conn: Mutex<Connection> }
 
 impl DataStore {
     pub fn open() -> Result<Self, String> {
@@ -12,9 +12,8 @@ impl DataStore {
         });
         let conn = Connection::open(&path).map_err(|e| format!("打开数据库失败: {e}"))?;
         conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
-        Ok(Self { conn: Mutex::new(conn), path })
+        Ok(Self { conn: Mutex::new(conn) })
     }
-    pub fn path(&self) -> &PathBuf { &self.path }
     pub fn profiles(&self, id: Option<&str>) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
         if let Some(id) = id {
