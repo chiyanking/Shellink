@@ -19,6 +19,7 @@ import {
   Server,
   Square,
   Terminal,
+  Trash2,
   UserRound,
   X,
 } from 'lucide-react'
@@ -48,6 +49,7 @@ export default function SessionsPage() {
     inspectedSessionId,
     inspectSession,
     endSessions,
+    removeSessions,
     renameSession,
     setSessionManual,
     notify,
@@ -61,6 +63,7 @@ export default function SessionsPage() {
   const [source, setSource] = useState('all')
   const [checked, setChecked] = useState<string[]>([])
   const [ending, setEnding] = useState<string[]>([])
+  const [deleting, setDeleting] = useState<string[]>([])
   const [renaming, setRenaming] = useState<Session | null>(null)
   const [name, setName] = useState('')
   const [detailTab, setDetailTab] = useState<'overview' | 'record'>('overview')
@@ -88,12 +91,13 @@ export default function SessionsPage() {
     sessions[0] ?? emptySession
   const host = connections.find((connection) => connection.id === selected.connectionId) ?? emptyConnection
   const selectedActive = selected.status !== 'ended'
-  const checkedActive = active.filter((session) => checked.includes(session.id))
-  const shownActive = shown.filter((session) => session.status !== 'ended')
+  const checkedSessions = sessions.filter((session) => checked.includes(session.id))
+  const checkedActive = checkedSessions.filter((session) => session.status !== 'ended')
   const allChecked =
-    shownActive.length > 0 && shownActive.every((session) => checked.includes(session.id))
+    shown.length > 0 && shown.every((session) => checked.includes(session.id))
   const endingSessions = sessions.filter((session) => ending.includes(session.id))
   const endingRunning = endingSessions.some((session) => session.status === 'running')
+  const deletingSessions = sessions.filter((session) => deleting.includes(session.id))
 
   function selectSession(id: string, record = false) {
     inspectSession(id)
@@ -212,19 +216,29 @@ export default function SessionsPage() {
             />
           </div>
 
-          {checkedActive.length > 0 && (
+          {checkedSessions.length > 0 && (
             <div className="session-bulk-bar">
               <button aria-label="取消选择会话" onClick={() => setChecked([])}>
                 <X size={14} />
               </button>
-              <span>已选 {checkedActive.length} 个活跃会话</span>
+              <span>已选 {checkedSessions.length} 个会话</span>
+              {checkedActive.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEnding(checkedActive.map((session) => session.id))}
+                >
+                  <Square size={12} />
+                  结束活跃会话
+                </Button>
+              )}
               <Button
-                variant="ghost"
+                variant="danger"
                 size="sm"
-                onClick={() => setEnding(checkedActive.map((session) => session.id))}
+                onClick={() => setDeleting(checkedSessions.map((session) => session.id))}
               >
-                <Square size={12} />
-                结束会话
+                <Trash2 size={12} />
+                删除会话
               </Button>
             </div>
           )}
@@ -236,19 +250,19 @@ export default function SessionsPage() {
                   <th className="session-check-cell">
                     <input
                       type="checkbox"
-                      aria-label="选择当前列表的活跃会话"
+                      aria-label="选择当前列表的会话"
                       checked={allChecked}
-                      disabled={!shownActive.length}
+                      disabled={!shown.length}
                       onChange={() =>
                         setChecked(
                           allChecked
                             ? checked.filter(
-                                (id) => !shownActive.some((session) => session.id === id),
+                                (id) => !shown.some((session) => session.id === id),
                               )
                             : [
                                 ...new Set([
                                   ...checked,
-                                  ...shownActive.map((session) => session.id),
+                                  ...shown.map((session) => session.id),
                                 ]),
                               ],
                         )
@@ -280,8 +294,7 @@ export default function SessionsPage() {
                         <input
                           type="checkbox"
                           aria-label={`选择 ${session.name}`}
-                          disabled={session.status === 'ended'}
-                          checked={checked.includes(session.id) && session.status !== 'ended'}
+                          checked={checked.includes(session.id)}
                           onChange={() => toggleChecked(session.id)}
                         />
                       </td>
@@ -381,6 +394,12 @@ export default function SessionsPage() {
                               label: '复制会话 ID',
                               icon: <Copy size={14} />,
                               onSelect: () => void navigator.clipboard.writeText(session.id).then(() => notify('已复制会话 ID')).catch(() => notify(session.id)),
+                            },
+                            {
+                              label: '删除会话记录',
+                              icon: <Trash2 size={14} />,
+                              danger: true,
+                              onSelect: () => setDeleting([session.id]),
                             },
                             ...(session.status !== 'ended'
                               ? [
@@ -653,6 +672,45 @@ export default function SessionsPage() {
             }}
           >
             结束会话
+          </Button>
+        </div>
+      </Dialog>
+      <Dialog
+        open={deleting.length > 0}
+        onOpenChange={(open) => !open && setDeleting([])}
+        title={deleting.length > 1 ? `删除 ${deleting.length} 个会话？` : '删除此会话？'}
+        description="会话及其全部操作记录将被永久删除，无法恢复。活跃会话也会同时关闭。"
+      >
+        <div className="session-ending-list">
+          {deletingSessions.map((session) => (
+            <div key={session.id}>
+              <Trash2 size={15} />
+              <span>
+                <strong>{session.name}</strong>
+                <code>{session.id}</code>
+              </span>
+              <Badge tone={sessionStatus[session.status].tone}>
+                {sessionStatus[session.status].label}
+              </Badge>
+            </div>
+          ))}
+        </div>
+        <div className="dialog-footer">
+          <span className="subtle">操作记录删除后无法恢复</span>
+          <Button variant="outline" onClick={() => setDeleting([])}>
+            取消
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => {
+              const ids = deleting
+              void removeSessions(ids)
+                .then(() => setChecked((current) => current.filter((id) => !ids.includes(id))))
+                .catch(() => {})
+              setDeleting([])
+            }}
+          >
+            删除会话
           </Button>
         </div>
       </Dialog>

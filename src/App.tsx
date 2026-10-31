@@ -170,6 +170,20 @@ export default function App() {
   async function endSessions(ids: string[]) {
     try { for (const id of ids) await rpc('sessions.close', { id }); await refresh(); setTabs(current => current.filter(id => !ids.includes(id))); notify(`已结束 ${ids.length} 个会话，终端历史保留。`) } catch (error) { notify(errorText(error)); await refresh(); throw error }
   }
+  async function removeSessions(ids: string[]) {
+    try {
+      for (const id of ids) await rpc('sessions.removeRecord', { id })
+      await refresh()
+      setTabs(current => current.filter(id => !ids.includes(id)))
+      setSelectedSessionId(current => ids.includes(current) ? '' : current)
+      setInspectedSessionId(current => ids.includes(current) ? '' : current)
+      notify(`已删除 ${ids.length} 个会话及其操作记录。`)
+    } catch (error) {
+      notify(errorText(error))
+      await refresh()
+      throw error
+    }
+  }
   function closeTab(id: string) { const next = tabs.filter(tab => tab !== id); setTabs(next); if (selectedSessionId === id) setSelectedSessionId(next[0] ?? '') }
   function editConnection(id: string) {
     const profile = connections.find(item => item.id === id)?.profile
@@ -212,6 +226,7 @@ export default function App() {
         historyScope,
         inspectHistory,
         endSessions,
+        removeSessions,
         renameSession,
         setSessionManual,
         openConnection,

@@ -28,6 +28,7 @@ export type DesignContext = {
   historyScope: { sessionId?: string; eventId?: string }
   inspectHistory: (sessionId: string, eventId?: string) => void
   endSessions: (ids: string[]) => Promise<void>
+  removeSessions: (ids: string[]) => Promise<void>
   renameSession: (id: string, name: string) => Promise<void>
   setSessionManual: (id: string, manual: boolean) => Promise<void>
   openConnection: (id: string) => void
