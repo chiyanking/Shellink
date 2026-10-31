@@ -9,7 +9,7 @@ func runningShellink() []int { return nil }
 
 func alive(pid int) bool { return false }
 
-func forceKill(pid int) {}
+func forceKill(pid int) error { return nil }
 
 func isElevated() bool { return false }
 

@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -103,8 +105,15 @@ func alive(pid int) bool {
 	return code == stillActive
 }
 
-func forceKill(pid int) {
-	_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
+// forceKill ends the process tree and reports why it failed when it did — a
+// silent failure here once left a port-holding daemon alive while the launcher
+// went on to a start that could never succeed.
+func forceKill(pid int) error {
+	out, err := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("taskkill /PID %d 失败: %v: %s", pid, err, bytes.TrimSpace(out))
+	}
+	return nil
 }
 
 // isElevated reports whether the launcher itself runs with an administrator

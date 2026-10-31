@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -181,10 +182,14 @@ func main() {
 // stopExisting shuts down any Shellink daemon that is still alive before this
 // one starts.
 //
-// A graceful "server stop" is tried first because it lets the running daemon
-// flush sessions and release the database and log handles. If it does not exit
-// in time (hung shutdown, or a daemon living in another folder with a
-// different data directory) the processes are killed outright.
+// A graceful stop is tried first because it lets the running daemon flush
+// sessions and release the database and log handles. Two roads lead there:
+// asking the daemon on the well-known HTTP port — the one road that reaches a
+// daemon from *another* folder or data directory — and "server stop", which
+// only reaches the daemon recorded in this directory's endpoint file. If
+// neither works in time (hung shutdown, or a daemon this window has no right
+// over) the processes are killed outright, with the failure reported instead
+// of swallowed.
 func stopExisting(core, dir string) {
 	pids := runningShellink()
 	if len(pids) == 0 {
@@ -192,6 +197,7 @@ func stopExisting(core, dir string) {
 		return
 	}
 	fmt.Printf("  发现旧服务 PID %s，正在通知其退出 ...\n", joinPIDs(pids))
+	requestHTTPStop()
 	runQuiet(core, dir, "server", "stop")
 	if waitGone(pids, 6*time.Second) {
 		fmt.Println("  旧服务已正常停止")
@@ -199,20 +205,47 @@ func stopExisting(core, dir string) {
 	}
 	left := aliveOf(pids)
 	fmt.Printf("  旧服务未在 6 秒内退出 (PID %s)，强制结束 ...\n", joinPIDs(left))
+	var killErrs []string
 	for _, pid := range left {
-		forceKill(pid)
+		if err := forceKill(pid); err != nil {
+			killErrs = append(killErrs, err.Error())
+		}
 	}
 	if waitGone(pids, 5*time.Second) {
 		fmt.Println("  旧服务已强制结束")
 		return
 	}
 	fmt.Printf("  警告: 仍有进程未退出 (PID %s)，启动可能失败。\n", joinPIDs(aliveOf(pids)))
+	for _, message := range killErrs {
+		fmt.Println("  " + message)
+	}
 	if !isElevated() {
 		// An elevated daemon cannot be killed by a normal process, and taskkill
 		// has no way to report that usefully, so name the reason here.
 		fmt.Println("  提示: 该进程以管理员权限运行，普通窗口无法结束它 —— 请在任务管理器中结束，")
 		fmt.Println("        或先关闭所有 Shellink 窗口再重新启动本程序。")
 	}
+}
+
+// requestHTTPStop asks whatever daemon is listening on the well-known port to
+// shut down. Every daemon binds 127.0.0.1:7070, the stop endpoint only answers
+// to local requests, and HTTP carries no privilege of its own — so this is the
+// one graceful stop that reaches a leftover daemon even when it runs elevated
+// or keeps its data somewhere this launcher has never seen.
+//
+// One raw request over a plain TCP connection, on purpose: pulling in
+// net/http just for this would double the launcher's size.
+func requestHTTPStop() {
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:7070", time.Second)
+	if err != nil {
+		return // nothing is listening on the port; the kill below handles that
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	_, _ = conn.Write([]byte("POST /shellink/api/server/stop HTTP/1.1\r\n" +
+		"Host: 127.0.0.1:7070\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
+	var reply [64]byte
+	_, _ = conn.Read(reply[:]) // the daemon acts on the request, the answer is noise
 }
 
 func runQuiet(core, dir string, args ...string) {
