@@ -67,7 +67,7 @@ export default function App() {
   const [inspectedSessionId, setInspectedSessionId] = useState('')
   const [historyScope, setHistoryScope] = useState<{ sessionId?: string; eventId?: string }>({})
   const [tabs, setTabs] = useState<string[]>(() => preference('restore', true) ? preference('tabs', []) : [])
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => preference('theme', 'dark'))
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => preference('theme', 'light'))
   const [font, setFont] = useState(() => preference('font', 'JetBrains Mono'))
   const [fontSize, setFontSize] = useState(() => preference('fontSize', '13'))
   const [sidebar, setSidebar] = useState(() => !window.matchMedia('(max-width: 580px)').matches)
