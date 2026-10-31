@@ -39,6 +39,21 @@ impl DataStore {
         let rows = s.query_map([], |r| Ok(json!({"id":r.get::<_,String>(0)?,"profileId":r.get::<_,String>(1)?,"profileName":r.get::<_,String>(2)?,"target":r.get::<_,String>(3)?,"state":r.get::<_,String>(4)?,"mode":r.get::<_,String>(5)?,"cols":r.get::<_,i64>(6)?,"rows":r.get::<_,i64>(7)?,"createdAt":r.get::<_,i64>(8)?,"closedAt":r.get::<_,Option<i64>>(9)?,"closeReason":r.get::<_,Option<String>>(10)?,"exitCode":r.get::<_,Option<i64>>(11)?,"name":r.get::<_,String>(12)?,"source":r.get::<_,String>(13)?,"active":r.get::<_,String>(4)? != "DISCONNECTED"}))).map_err(|e| e.to_string())?;
         let mut out=Vec::new(); for row in rows { out.push(row.map_err(|e|e.to_string())?); } Ok(Value::Array(out))
     }
+    pub fn command_profile(&self, id: &str) -> Result<(String, String, String, i64, i64), String> {
+        let c=self.conn.lock().unwrap(); c.query_row("SELECT name,connect_type,COALESCE(command,''),cols,rows FROM profiles WHERE id=?", [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional().map_err(|e|e.to_string())?.ok_or_else(||"Profile not found".into())
+    }
+    pub fn insert_session(&self, id: &str, profile_id: &str, profile_name: &str, target: &str, cols: i64, rows: i64, name: &str, source: &str, mode: &str) -> Result<(), String> {
+        let c=self.conn.lock().unwrap(); c.execute("INSERT INTO sessions (id,profile_id,profile_name,target,state,mode,cols,rows,created_at,name,source) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rusqlite::params![id,profile_id,profile_name,target,"CONNECTING",mode,cols,rows,now(),name,source]).map_err(|e|e.to_string()).map(|_|())
+    }
+    pub fn update_session_state(&self, id: &str, state: &str, reason: Option<&str>) -> Result<(), String> {
+        let c=self.conn.lock().unwrap(); c.execute("UPDATE sessions SET state=?,closed_at=CASE WHEN ?='DISCONNECTED' THEN ? ELSE closed_at END,close_reason=CASE WHEN ?='DISCONNECTED' THEN ? ELSE close_reason END WHERE id=?", rusqlite::params![state,state,now(),state,reason,id]).map_err(|e|e.to_string()).map(|_|())
+    }
+    pub fn session_state(&self, id: &str) -> Result<Value, String> {
+        let c=self.conn.lock().unwrap(); c.query_row("SELECT id,state,mode,closed_at,close_reason,exit_code FROM sessions WHERE id=?", [id], |r| Ok(json!({"id":r.get::<_,String>(0)?,"state":r.get::<_,String>(1)?,"mode":r.get::<_,String>(2)?,"closedAt":r.get::<_,Option<i64>>(3)?,"closeReason":r.get::<_,Option<String>>(4)?,"exitCode":r.get::<_,Option<i64>>(5)?,"active":r.get::<_,String>(1)? != "DISCONNECTED","lastSeq":0,"recentOutput":""}))).optional().map_err(|e|e.to_string())?.ok_or_else(||"Session not found".into())
+    }
+    pub fn add_output(&self, id: &str, text: &str) -> Result<(), String> {
+        let c=self.conn.lock().unwrap(); let seq:i64=c.query_row("SELECT COALESCE(MAX(seq),0)+1 FROM history_chunks WHERE session_id=?", [id], |r|r.get(0)).map_err(|e|e.to_string())?; c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,text,0,now()]).map_err(|e|e.to_string()).map(|_|())
+    }
     pub fn profile_create(&self, p: &Value) -> Result<Value, String> {
         let name = p.get("name").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or("name must be a non-empty string")?;
         let id = format!("rust-{}", now()); let t = now();
@@ -61,6 +76,7 @@ impl DataStore {
     pub fn profile_delete(&self, id: &str) -> Result<Value, String> { let c=self.conn.lock().unwrap(); c.execute("DELETE FROM profiles WHERE id=?",[id]).map_err(|e|e.to_string())?; Ok(json!({"ok":true})) }
 }
 
+pub(crate) fn session_now() -> i64 { now() }
 fn now() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64 }
 
 fn load_master_key(db: &PathBuf) -> Result<[u8; 32], String> {
