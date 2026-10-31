@@ -101,12 +101,15 @@ pub async fn core_request(app: AppHandle, state: tauri::State<'_, Arc<Backend>>,
     if method == "sessions.state" {
         if let Some(db)=app.try_state::<Option<crate::data::DataStore>>() { if let Some(db)=db.inner().as_ref() { if let Some(id)=params.get("id").and_then(Value::as_str) { if let Ok(value)=db.session_state(id) { return Ok(value); } } } }
     }
+    if method == "sessions.historyChunks" {
+        if let Some(db)=app.try_state::<Option<crate::data::DataStore>>() { if let Some(db)=db.inner().as_ref() { if let Some(id)=params.get("id").and_then(Value::as_str) { let since=params.get("since").and_then(Value::as_i64).unwrap_or(0); let limit=params.get("limit").and_then(Value::as_i64).unwrap_or(500); if let Ok(value)=db.history_chunks(id,since,limit) { return Ok(value); } } } }
+    }
     if matches!(method.as_str(), "sessions.create" | "sessions.input" | "sessions.close") {
         if let (Some(db), Some(manager)) = (app.try_state::<Option<crate::data::DataStore>>(), app.try_state::<Arc<crate::sessions::SessionManager>>()) {
             if let Some(db)=db.inner().as_ref() {
                 let local=match method.as_str() {
                     "sessions.create" => manager.create(&app,db,params.get("profileId").and_then(Value::as_str).ok_or("profileId is required")?,params.get("name").and_then(Value::as_str).unwrap_or(""),params.get("source").and_then(Value::as_str).unwrap_or("desktop"),params.get("mode").and_then(Value::as_str).unwrap_or("MANUAL"),params.get("cols").and_then(Value::as_i64).unwrap_or(0),params.get("rows").and_then(Value::as_i64).unwrap_or(0)),
-                    "sessions.input" => manager.input(params.get("id").and_then(Value::as_str).ok_or("id is required")?,params.get("text").and_then(Value::as_str).ok_or("text is required")?,params.get("appendNewline").and_then(Value::as_bool).unwrap_or(true)),
+                    "sessions.input" => manager.input(db,params.get("id").and_then(Value::as_str).ok_or("id is required")?,params.get("text").and_then(Value::as_str).ok_or("text is required")?,params.get("appendNewline").and_then(Value::as_bool).unwrap_or(true)),
                     _ => manager.close(db,params.get("id").and_then(Value::as_str).ok_or("id is required")?),
                 }; if local.is_ok(){return local;}
             }

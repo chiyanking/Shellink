@@ -27,7 +27,7 @@ impl SessionManager {
         thread::spawn(move || { let _=event_app.emit("shellink:event",json!({"event":"session.created","data":{"sessionId":event_id}})); });
         Ok(json!({"id":id,"state":"CONNECTING","mode":mode,"target":command}))
     }
-    pub fn input(&self,id:&str,text:&str,append:bool)->Result<serde_json::Value,String>{let mut live=self.live.lock().unwrap();let s=live.get_mut(id).ok_or("Session not found")?;s.input.write_all(text.as_bytes()).map_err(|e|e.to_string())?;if append{s.input.write_all(b"\n").map_err(|e|e.to_string())?;}s.input.flush().map_err(|e|e.to_string())?;Ok(json!({"ok":true}))}
+    pub fn input(&self,db:&DataStore,id:&str,text:&str,append:bool)->Result<serde_json::Value,String>{let mut live=self.live.lock().unwrap();let s=live.get_mut(id).ok_or("Session not found")?;s.input.write_all(text.as_bytes()).map_err(|e|e.to_string())?;if append{s.input.write_all(b"\n").map_err(|e|e.to_string())?;}s.input.flush().map_err(|e|e.to_string())?;let recorded=if append{format!("{}\n",text)}else{text.to_string()};let _=db.add_input(id,&recorded);Ok(json!({"ok":true}))}
     pub fn close(&self,db:&DataStore,id:&str)->Result<serde_json::Value,String>{let mut live=self.live.lock().unwrap();if let Some(mut s)=live.remove(id){let _=s.child.kill();let _=s.child.wait();}db.update_session_state(id,"DISCONNECTED",Some("Closed by user"))?;Ok(json!({"closed":true}))}
     pub fn shutdown(&self,db:&DataStore){let ids:Vec<String>=self.live.lock().unwrap().keys().cloned().collect();for id in ids{let _=self.close(db,&id);}}
 }
