@@ -71,7 +71,6 @@ export default function App() {
   const [font, setFont] = useState(() => preference('font', 'JetBrains Mono'))
   const [fontSize, setFontSize] = useState(() => preference('fontSize', '13'))
   const [sidebar, setSidebar] = useState(() => !window.matchMedia('(max-width: 580px)').matches)
-  const [inspector, setInspector] = useState(true)
   const [split, setSplit] = useState(false)
   const [modal, setModal] = useState<Modal>(null)
   const [toast, setToast] = useState('')
@@ -234,8 +233,6 @@ export default function App() {
         closeTab,
         manual,
         setManual,
-        inspector,
-        setInspector,
         split,
         setSplit,
         openModal: setModal,

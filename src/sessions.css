@@ -707,10 +707,6 @@
   top: 0;
   font-size: 10px;
 }
-.inspector-manage {
-  margin-top: 18px;
-  font-size: 10px;
-}
 .workspace-empty {
   border: 1px dashed var(--border-strong);
   border-radius: 9px;

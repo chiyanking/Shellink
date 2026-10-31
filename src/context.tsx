@@ -36,8 +36,6 @@ export type DesignContext = {
   closeTab: (id: string) => void
   manual: boolean
   setManual: (manual: boolean) => void
-  inspector: boolean
-  setInspector: (show: boolean) => void
   split: boolean
   setSplit: (split: boolean) => void
   openModal: (modal: Modal) => void

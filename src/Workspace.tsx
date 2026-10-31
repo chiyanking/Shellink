@@ -4,7 +4,6 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import {
   ArrowRight,
-  ArrowUpRight,
   Bot,
   Copy,
   Ellipsis,
@@ -12,14 +11,12 @@ import {
   Hand,
   History,
   Keyboard,
-  PanelRightClose,
   PanelsTopLeft,
   Plus,
   Radio,
   ShieldCheck,
   SquareSplitHorizontal,
   Terminal,
-  UserRound,
   X,
 } from 'lucide-react'
 import { useDesign } from './context'
@@ -212,7 +209,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
         </div>
       </div>
       <div className="terminal-address">
-        <div>
+        <div className="terminal-connection">
           <ShieldCheck size={13} />
           <span>
             {connection.user}@{connection.host}
@@ -220,10 +217,46 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           {connection.type === 'SSH' && <span className="terminal-port">:{connection.port}</span>}
           <Badge>{connection.type === 'Local' ? 'ZSH' : 'SSH'}</Badge>
         </div>
-        <span className="terminal-ready">
-          <span className="status-dot" />
-          {sessionStatus[session.status].label}
-        </span>
+        <div className="terminal-session-meta">
+          <div className="terminal-control" role="group" aria-label="控制权模式">
+            <span className="terminal-meta-label">控制权</span>
+            <button
+              className={cn('terminal-control-option', !manual && 'is-active')}
+              aria-pressed={!manual}
+              disabled={session.status === 'ended'}
+              onClick={() => setManual(false)}
+            >
+              <Bot size={12} />
+              AI 自动
+            </button>
+            <button
+              className={cn('terminal-control-option', manual && 'is-active')}
+              aria-pressed={manual}
+              disabled={session.status === 'ended'}
+              onClick={() => setManual(true)}
+            >
+              <Hand size={12} />
+              手动控制
+            </button>
+          </div>
+          <div className="terminal-session-id" title={session.id}>
+            <span className="terminal-meta-label">Session ID</span>
+            <code>{session.id}</code>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="复制 Session ID"
+              title="复制 Session ID"
+              onClick={() => void navigator.clipboard.writeText(session.id).then(() => notify('已复制会话 ID')).catch(() => notify(session.id))}
+            >
+              <Copy size={12} />
+            </Button>
+          </div>
+          <span className="terminal-ready">
+            <span className="status-dot" />
+            {sessionStatus[session.status].label}
+          </span>
+        </div>
       </div>
       <div hidden={bottomTab !== 'terminal'}><TerminalContent session={session} /></div>
       {bottomTab === 'files' && <div className="terminal-files empty-state"><FolderOpen size={22} /><h3>文件浏览不可用</h3><p>当前后台协议未提供目录浏览接口。</p></div>}
@@ -270,162 +303,11 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
   )
 }
 
-function SessionInspector() {
-  const {
-    manual,
-    setManual,
-    setInspector,
-    inspectHistory,
-    selected,
-    selectedSession,
-    inspectSession,
-    notify,
-  } = useDesign()
-  const [recentChunks, setRecentChunks] = useState<{id:number;seq:number;direction:string;plain:string;createdAt:number}[]>([])
-  useEffect(() => {
-    if (!selectedSession.id) { setRecentChunks([]); return }
-    let active = true
-    void import('./backend').then(({rpc}) => rpc<{items:{id:number;seq:number;direction:string;plain:string;createdAt:number}[]}>('sessions.historyChunks', {id:selectedSession.id,since:0,limit:100})).then(page => { if (active) setRecentChunks(page.items.slice(-3).reverse()) }).catch(() => { if (active) setRecentChunks([]) })
-    return () => { active = false }
-  }, [selectedSession.id])
-  return (
-    <aside className="session-inspector" aria-label="会话控制与活动">
-      <div className="inspector-header">
-        <span>会话面板</span>
-        <Hint label="收起会话面板">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="收起会话面板"
-            onClick={() => setInspector(false)}
-          >
-            <PanelRightClose size={15} />
-          </Button>
-        </Hint>
-      </div>
-      <div className="inspector-control">
-        <div className="section-label">
-          控制权 <span className="subtle">{manual ? 'MANUAL' : 'AUTO'}</span>
-        </div>
-        <div className="control-segments" aria-label="控制权模式">
-          <button
-            aria-pressed={!manual}
-            className={!manual ? 'is-active' : ''}
-            onClick={() => setManual(false)}
-          >
-            <Bot size={14} />
-            AI 自动
-          </button>
-          <button
-            aria-pressed={manual}
-            className={manual ? 'is-active' : ''}
-            onClick={() => setManual(true)}
-          >
-            <Hand size={14} />
-            手动控制
-          </button>
-        </div>
-        <div className="controller-info">
-          <div className={cn('controller-avatar', manual && 'is-human')}>
-            {manual ? <UserRound size={19} /> : <Bot size={19} />}
-          </div>
-          <div>
-            <strong>{manual ? '你正在控制终端' : selectedSession.client}</strong>
-            <span>{manual ? 'AI 仍可观察终端输出' : '终端已就绪，等待下一步指令'}</span>
-          </div>
-          <span className="status-dot" />
-        </div>
-        <Button
-          className="takeover-button"
-          aria-label={manual ? '交还 AI 控制权' : '接管终端'}
-          variant={manual ? 'default' : 'outline'}
-          onClick={() => setManual(!manual)}
-        >
-          {manual ? <Bot size={14} /> : <Hand size={14} />}
-          {manual ? '交还 AI 控制权' : '接管终端'}
-          <span>⇧ Esc</span>
-        </Button>
-        <p className="control-hint">
-          {manual ? '此会话由人工控制，后台拒绝自动输入。' : '切换为手动控制后，可在终端直接输入。'}
-        </p>
-      </div>
-      <div className="inspector-activity">
-        <div className="section-label">
-          终端片段{' '}
-          <span className="live-indicator">
-            <span />
-            实时
-          </span>
-        </div>
-        <div className="activity-timeline">
-          {recentChunks.map((activity) => (
-              <div className="activity-item" key={activity.id}>
-                <div className="activity-icon"><Terminal size={12} /></div>
-                <div className="activity-content">
-                  <div className="activity-meta">
-                    <span>来源未知 · {activity.direction}</span>
-                    <time>{new Date(activity.createdAt).toLocaleTimeString()}</time>
-                  </div>
-                  <code className="activity-title">{activity.plain.slice(0, 180) || '(空片段)'}</code>
-                </div>
-              </div>
-            ))}
-          {!recentChunks.length && <span className="subtle">暂无历史片段</span>}
-        </div>
-        <button className="text-link" onClick={() => inspectHistory(selectedSession.id)}>
-          查看此会话记录
-          <ArrowUpRight size={13} />
-        </button>
-      </div>
-      <div className="inspector-details">
-        <div className="section-label">连接信息</div>
-        <dl>
-          <div>
-            <dt>会话 ID</dt>
-            <dd className="inspector-session-id">
-              <code>{selectedSession.id}</code>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="复制 Session ID"
-                title="复制 Session ID"
-                onClick={() => void navigator.clipboard.writeText(selectedSession.id).then(() => notify('已复制会话 ID')).catch(() => notify(selectedSession.id))}
-              >
-                <Copy size={11} />
-              </Button>
-            </dd>
-          </div>
-          <div>
-            <dt>连接方式</dt>
-            <dd>{selected.type}</dd>
-          </div>
-          <div>
-            <dt>连接时间</dt>
-            <dd>{selectedSession.created.replace('今天 ', '')}</dd>
-          </div>
-          <div>
-            <dt>状态</dt>
-            <dd className="text-green">{sessionStatus[selectedSession.status].label}</dd>
-          </div>
-        </dl>
-        <button
-          className="text-link inspector-manage"
-          onClick={() => inspectSession(selectedSession.id)}
-        >
-          管理此会话
-          <ArrowUpRight size={12} />
-        </button>
-      </div>
-    </aside>
-  )
-}
-
 export default function Workspace() {
   const {
     selectedSession,
     sessions,
     tabs,
-    inspector,
     split,
     openModal,
     navigate,
@@ -456,14 +338,13 @@ export default function Workspace() {
     )
   return (
     <div className="workspace-page workspace-terminal-page">
-      <div className={cn('workspace-grid', !inspector && 'without-inspector')}>
+      <div className="workspace-grid">
         <div className="workspace-main">
           <div className={cn('terminal-panes', split && 'is-split')}>
             <TerminalPanel session={selectedSession} />
             {split && otherSession && <TerminalPanel session={otherSession} secondary />}
           </div>
         </div>
-        {inspector && <SessionInspector />}
       </div>
     </div>
   )
