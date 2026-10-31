@@ -33,6 +33,7 @@ impl Backend {
             return Err(if reason.trim().is_empty() { "与后台的连接已断开，请重新连接。".into() } else { reason });
         }
         let mut command = Command::new(Self::core_path(app)?);
+        command.env("SHELLINK_HTTP_ENABLED", "false");
         command.arg("desktop-bridge").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
         let mut child = command.spawn().map_err(|e| format!("无法启动桌面桥接: {e}"))?;
