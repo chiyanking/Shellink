@@ -453,7 +453,7 @@ export default function App() {
                   </span>
                 </div>
               </header>
-              <div className="main-scroll" data-ui-scroll-container>
+              <div className={cn('main-scroll', page === 'workspace' && 'workspace-scroll')} data-ui-scroll-container>
                 {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接 Desktop 核心'}</strong><p>{backendError || '正在初始化本地 Rust 核心。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
                 <div hidden={page !== 'workspace'}><Workspace /></div>
                 {page === 'sessions' && <SessionsPage />}

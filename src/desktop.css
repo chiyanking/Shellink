@@ -852,6 +852,9 @@ select {
   flex: 1;
   padding: 27px 28px 22px;
 }
+.main-scroll.workspace-scroll {
+  padding: 0;
+}
 .app-statusbar {
   display: flex;
   justify-content: space-between;
