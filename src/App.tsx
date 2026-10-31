@@ -351,10 +351,6 @@ export default function App() {
                   </section>
                 ))}
               </div>
-              <button className="sidebar-add" onClick={() => setModal('connection')}>
-                <Plus size={13} />
-                添加新连接
-              </button>
               <div className="sidebar-bottom">
                 <button
                   className="sidebar-quick-open"

@@ -713,20 +713,6 @@ select {
 .color-green {
   color: var(--green);
 }
-.sidebar-add {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 14px 12px 18px 25px;
-  background: transparent;
-  border: 0;
-  color: var(--subtle-foreground);
-  font-size: 11px;
-}
-.sidebar-add:hover {
-  color: var(--foreground);
-}
 .sidebar-bottom {
   margin-top: auto;
   padding-top: 25px;
@@ -3035,9 +3021,6 @@ select {
     display: none;
   }
   .sidebar-connection {
-    padding-left: 16px;
-  }
-  .sidebar-add {
     padding-left: 16px;
   }
   .page-heading h1 {
