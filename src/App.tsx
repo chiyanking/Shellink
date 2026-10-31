@@ -250,7 +250,7 @@ export default function App() {
                 trigger={
                   <button className="workspace-switcher">
                     <span className="brand-mark">
-                      <Terminal size={19} strokeWidth={2.4} />
+                      <Terminal size={15} strokeWidth={2.6} />
                     </span>
                     <span>
                       <strong>Shellink</strong>
@@ -455,7 +455,7 @@ export default function App() {
               </header>
               <div className={cn('main-scroll', page === 'workspace' && 'workspace-scroll')} data-ui-scroll-container>
                 {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接 Desktop 核心'}</strong><p>{backendError || '正在初始化本地 Rust 核心。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
-                <div hidden={page !== 'workspace'}><Workspace /></div>
+                <div className="workspace-slot" hidden={page !== 'workspace'}><Workspace /></div>
                 {page === 'sessions' && <SessionsPage />}
                 {page === 'connections' && <ConnectionsPage />}
                 {page === 'integrations' && <IntegrationsPage />}

@@ -50,14 +50,28 @@ export function PageHeading({
 }
 
 function TerminalContent({ session }: { session: Session }) {
-  const { coreEpoch, font, fontSize, notify } = useDesign()
+  const { coreEpoch, font, fontSize, notify, theme: colorScheme } = useDesign()
   const control = useRef({ manual: false, active: false })
   control.current = { manual: session.mode === 'MANUAL', active: session.status !== 'ended' }
   const host = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!host.current || !session.id) return
     let alive = true
-    const terminal = new XTerm({ convertEol: true, cursorBlink: true, fontFamily: `"${font}", monospace`, fontSize: Number(fontSize), theme: { background: '#101316', foreground: '#d9e0df' } })
+    const token = (name: string, fallback: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+    const terminal = new XTerm({
+      convertEol: true,
+      cursorBlink: true,
+      fontFamily: `"${font}", monospace`,
+      fontSize: Number(fontSize),
+      theme: {
+        background: token('--terminal-canvas', '#121317'),
+        foreground: token('--terminal-foreground', '#aeb4c1'),
+        cursor: token('--terminal-cursor', '#9cb4f5'),
+        cursorAccent: token('--terminal-canvas', '#121317'),
+        selectionBackground: colorScheme === 'dark' ? '#39405a' : '#cfdcfb',
+      },
+    })
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.current)
     let replaySeq = 0
     const buffered: { seq: number; raw: string }[] = []
@@ -107,7 +121,7 @@ function TerminalContent({ session }: { session: Session }) {
       buffered.sort((a, b) => a.seq - b.seq).forEach(item => { if (item.seq > replaySeq) { terminal.write(item.raw); replaySeq = item.seq } })
     })().catch(error => { if (alive) notify(String(error)) })
     return () => { alive = false; dispose?.(); resizeObserver.disconnect(); cancelAnimationFrame(resizeFrame); input.dispose(); terminal.dispose() }
-  }, [session.id, font, fontSize, coreEpoch, notify])
+  }, [session.id, font, fontSize, coreEpoch, notify, colorScheme])
   return <div className="terminal-output xterm-host" aria-label={`${session.name} 终端`}><div ref={host} className="terminal-viewport" /></div>
 }
 
@@ -217,6 +231,11 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           {connection.type === 'SSH' && <span className="terminal-port">:{connection.port}</span>}
           <Badge>{connection.type === 'Local' ? 'ZSH' : 'SSH'}</Badge>
         </div>
+        {connection.type !== 'Local' && ['Production', 'Development'].includes(connection.group) && (
+          <span className={cn('terminal-env', connection.group === 'Production' && 'is-production')}>
+            {connection.group}
+          </span>
+        )}
         <div className="terminal-session-meta">
           <div className={cn('terminal-header-notice', manual && 'is-manual')}>
             {session.status === 'ended' ? <div><History size={13} /><span>会话已结束 · {session.result} · 终端输出已保留</span></div> : <>
@@ -266,7 +285,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           </span>
         </div>
       </div>
-      <div hidden={bottomTab !== 'terminal'}><TerminalContent session={session} /></div>
+      <div className="terminal-body" hidden={bottomTab !== 'terminal'}><TerminalContent session={session} /></div>
       {bottomTab === 'files' && <div className="terminal-files empty-state"><FolderOpen size={22} /><h3>文件浏览不可用</h3><p>当前后台协议未提供目录浏览接口。</p></div>}
       <div className="terminal-bottom">
         <div className="terminal-bottom-tabs">
