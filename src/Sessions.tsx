@@ -33,8 +33,6 @@ import { SessionHistoryPreview } from './History'
 function SourceIcon({ source, size = 13 }: { source: Session['source']; size?: number }) {
   return source === 'MCP' ? (
     <Bot size={size} />
-  ) : source === 'CLI' ? (
-    <Terminal size={size} />
   ) : (
     <UserRound size={size} />
   )
@@ -116,7 +114,7 @@ export default function SessionsPage() {
       <PageHeading
         eyebrow="SESSIONS"
         title="会话管理"
-        description="每一个终端实例，都能在这里找到。界面、CLI 与 MCP 统一管理。"
+        description="每一个终端实例，都能在这里找到。界面与 MCP 统一管理。"
       >
         <Button onClick={() => openModal('session')}>
           <Plus size={15} />
@@ -142,7 +140,7 @@ export default function SessionsPage() {
           <strong>{active.filter((session) => !tabs.includes(session.id)).length}</strong>{' '}
           在后台保留
         </div>
-        <Hint label="工作台标签只是会话的一个视图。CLI / MCP 创建的会话也会出现在此处。">
+        <Hint label="工作台标签只是会话的一个视图。MCP 创建的会话也会出现在此处。">
           <button className="session-summary-help" aria-label="会话与标签的区别">
             <CircleHelp size={15} />
           </button>
@@ -209,7 +207,6 @@ export default function SessionsPage() {
               options={[
                 { value: 'all', label: '全部来源' },
                 { value: 'MCP', label: 'MCP 创建' },
-                { value: 'CLI', label: 'CLI 创建' },
                 { value: '你', label: '界面创建' },
               ]}
             />
@@ -569,7 +566,7 @@ export default function SessionsPage() {
                     {selected.status === 'attention'
                       ? '终端正在等待密码，需要你打开终端接管。'
                       : selected.mode === 'AUTO'
-                        ? 'CLI / MCP 可向此会话提交操作。'
+                        ? 'MCP 可向此会话提交操作。'
                         : 'AI 写入暂停，仍可观察终端输出。'}
                   </p>
                 </div>

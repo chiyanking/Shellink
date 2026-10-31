@@ -248,7 +248,6 @@ export function ConnectionsPage() {
 
 export function IntegrationsPage() {
   const { notify, mcp, refresh } = useDesign()
-  const [method, setMethod] = useState('mcp')
   const [client, setClient] = useState('Claude Code')
   const [transport, setTransport] = useState('stdio')
   const [httpEnabled, setHttpEnabled] = useState(mcp?.httpEnabled ?? false)
@@ -282,8 +281,6 @@ export function IntegrationsPage() {
             null,
             2,
           )
-  const cli =
-    'shellink session list --json\n\nshellink session exec SESSION_ID \\\n  --command "docker compose ps" \\\n  --json'
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text)
@@ -295,9 +292,9 @@ export function IntegrationsPage() {
   return (
     <div className="standard-page integrations-page">
       <PageHeading
-        eyebrow="AI INTEGRATIONS"
-        title="AI 接入"
-        description="让你喜欢的 AI，使用你熟悉的终端。"
+        eyebrow="MCP INTEGRATIONS"
+        title="MCP 接入"
+        description="让外部 AI 客户端安全访问当前 Desktop 的连接和会话。"
       >
         <Badge className="preview-badge">
           <span className="status-dot" />
@@ -306,21 +303,12 @@ export function IntegrationsPage() {
       </PageHeading>
       <div className="integration-methods" aria-label="接入方式">
         <button
-          className={method === 'mcp' ? 'is-active' : ''}
-          aria-pressed={method === 'mcp'}
-          onClick={() => setMethod('mcp')}
+          className="is-active"
+          aria-pressed="true"
         >
           <Workflow size={16} />
-          <span>MCP 接入</span>
+          <span>Desktop MCP</span>
           <Badge tone="blue">推荐</Badge>
-        </button>
-        <button
-          className={method === 'cli' ? 'is-active' : ''}
-          aria-pressed={method === 'cli'}
-          onClick={() => setMethod('cli')}
-        >
-          <Terminal size={16} />
-          <span>CLI 命令行</span>
         </button>
       </div>
       <div className="integration-layout">
@@ -328,84 +316,67 @@ export function IntegrationsPage() {
           <div className="panel-title">
             <span className="step-number">1</span>
             <div>
-              <h2>{method === 'mcp' ? '选择你的 AI 客户端' : '从命令行开始'}</h2>
-              <p>
-                {method === 'mcp'
-                  ? '复制配置，添加到客户端的 MCP 设置。'
-                  : '在现有 AI 工作流中使用结构化命令。'}
-              </p>
+              <h2>选择你的 AI 客户端</h2>
+              <p>复制配置，添加到客户端的 MCP 设置。</p>
             </div>
           </div>
-          {method === 'mcp' ? (
-            <>
-              <div className="client-choices">
-                {[
-                  { name: 'Claude Code', symbol: '✳', className: 'client-claude' },
-                  { name: 'Codex', symbol: '⌘', className: 'client-codex' },
-                  { name: 'Cursor', symbol: '◈', className: 'client-cursor' },
-                ].map((item) => (
-                  <button
-                    key={item.name}
-                    className={cn('client-choice', client === item.name && 'is-active')}
-                    onClick={() => setClient(item.name)}
-                    aria-pressed={client === item.name}
-                  >
-                    <span className={item.className} aria-hidden="true">
-                      {item.symbol}
-                    </span>
-                    <strong>{item.name}</strong>
-                    {client === item.name && <Check size={13} />}
-                  </button>
-                ))}
-              </div>
-              <div className="transport-row">
-                <span>传输方式</span>
-                <div className="small-segments">
-                  <button
-                    className={transport === 'stdio' ? 'is-active' : ''}
-                    aria-pressed={transport === 'stdio'}
-                    onClick={() => setTransport('stdio')}
-                  >
-                    stdio
-                  </button>
-                  <button
-                    className={transport === 'http' ? 'is-active' : ''}
-                    aria-pressed={transport === 'http'}
-                    onClick={() => setTransport('http')}
-                  >
-                    HTTP
-                  </button>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="cli-path">
-              <Terminal size={15} />
-              <code>{executable || '后台路径不可用'}</code>
+          <div className="client-choices">
+            {[
+              { name: 'Claude Code', symbol: '✳', className: 'client-claude' },
+              { name: 'Codex', symbol: '⌘', className: 'client-codex' },
+              { name: 'Cursor', symbol: '◈', className: 'client-cursor' },
+            ].map((item) => (
+              <button
+                key={item.name}
+                className={cn('client-choice', client === item.name && 'is-active')}
+                onClick={() => setClient(item.name)}
+                aria-pressed={client === item.name}
+              >
+                <span className={item.className} aria-hidden="true">
+                  {item.symbol}
+                </span>
+                <strong>{item.name}</strong>
+                {client === item.name && <Check size={13} />}
+              </button>
+            ))}
+          </div>
+          <div className="transport-row">
+            <span>传输方式</span>
+            <div className="small-segments">
+              <button
+                className={transport === 'stdio' ? 'is-active' : ''}
+                aria-pressed={transport === 'stdio'}
+                onClick={() => setTransport('stdio')}
+              >
+                stdio
+              </button>
+              <button
+                className={transport === 'http' ? 'is-active' : ''}
+                aria-pressed={transport === 'http'}
+                onClick={() => setTransport('http')}
+              >
+                HTTP
+              </button>
             </div>
-          )}
+          </div>
           <div className="config-code">
             <div className="config-code-heading">
               <span>
                 <Braces size={13} />
-                {method === 'cli'
-                  ? 'Terminal'
-                  : client === 'Codex' && transport === 'stdio'
-                    ? 'config.toml'
-                    : 'mcp.json'}
+                {client === 'Codex' && transport === 'stdio' ? 'config.toml' : 'mcp.json'}
                 <Badge>本机配置</Badge>
               </span>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => copy(method === 'cli' ? cli : config)}
+                onClick={() => copy(config)}
               >
                 <Copy size={13} />
                 复制
               </Button>
             </div>
             <pre className="ui-selectable">
-              <code>{method === 'cli' ? cli : config}</code>
+              <code>{config}</code>
             </pre>
           </div>
           <div className="integration-note">
@@ -415,12 +386,8 @@ export function IntegrationsPage() {
           <div className="integration-next-step">
             <span className="step-number">2</span>
             <div>
-              <h3>{method === 'mcp' ? '保存配置，重新连接客户端' : '交给 AI，继续你的工作'}</h3>
-              <p>
-                {method === 'mcp'
-                  ? '接入后，AI 可发现已有主机并复用持久终端会话。'
-                  : '命令返回 JSON 结果，适合自动化工具读取和处理。'}
-              </p>
+              <h3>保存配置，重新连接客户端</h3>
+              <p>接入后，AI 可发现已有主机并复用当前 Desktop 的终端会话。</p>
             </div>
           </div>
         </section>
@@ -431,7 +398,7 @@ export function IntegrationsPage() {
               为终端协作准备
             </div>
             <h3>一个会话，多个入口。</h3>
-            <p>界面、CLI 和 MCP 共享同一份终端状态。</p>
+            <p>界面和 MCP 共享同一份终端状态。</p>
             <div className="capability">
               <Server size={16} />
               <div>
@@ -660,14 +627,14 @@ export function SettingsPage() {
                 <h2>自动化与后台</h2>
                 <p>后台运行信息与本地集成入口。</p>
               </div>
-              <SettingRow title="后台进程" description={`${runtime?.command ?? '未知可执行文件'} · PID ${runtime?.status.pid ?? '—'}`}>
+                <SettingRow title="Desktop 核心" description={`${runtime?.command ?? '未知可执行文件'} · PID ${runtime?.status.pid ?? '—'}`}>
                 <Badge tone={runtime ? 'green' : 'neutral'}>
                   <span className="status-dot" />
                   {runtime ? '运行中' : '未连接'}
                 </Badge>
               </SettingRow>
               <SettingRow title="HTTP 服务" description={runtime?.status.httpUrl ?? 'HTTP 服务未启用'}><Badge tone={runtime?.status.httpEnabled ? 'green' : 'neutral'}>{runtime?.status.httpEnabled ? '运行中' : '已关闭'}</Badge></SettingRow>
-              <SettingRow title="活动会话" description="后台实时状态"><Badge>{runtime?.status.activeSessions ?? 0}</Badge></SettingRow>
+                <SettingRow title="活动会话" description="Desktop 实时状态"><Badge>{runtime?.status.activeSessions ?? 0}</Badge></SettingRow>
               <SettingRow title="Webhook 回调消息" description="查看外部服务发送到 Shellink 的回调事件和消息原文。">
                 <Button
                   variant="outline"
@@ -677,18 +644,18 @@ export function SettingsPage() {
                   管理
                 </Button>
               </SettingRow>
-              <SettingRow title="诊断信息" description="查看后台服务、版本和运行环境。">
+                <SettingRow title="诊断信息" description="查看 Desktop 核心、版本和运行环境。">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => runtime ? notify(`版本 ${runtime.status.version} · PID ${runtime.status.pid} · ${runtime.status.activeSessions} 个活跃会话 · ${runtime.platform} · 日志 ${runtime.logPath}`) : notify('后台尚未连接。')}
+                  onClick={() => runtime ? notify(`版本 ${runtime.status.version} · PID ${runtime.status.pid} · ${runtime.status.activeSessions} 个活跃会话 · ${runtime.platform} · 日志 ${runtime.logPath}`) : notify('Desktop 尚未连接。')}
                 >
                   查看诊断
                 </Button>
               </SettingRow>
               <div className="advanced-note">
                 <ShieldCheck size={15} />
-                <span>会话后台在应用窗口关闭后继续运行；系统 PATH 与登录启动尚未提供配置接口。</span>
+                <span>会话和 MCP 服务随 Desktop 窗口运行，关闭窗口后会一并停止。</span>
               </div>
             </>
           )}

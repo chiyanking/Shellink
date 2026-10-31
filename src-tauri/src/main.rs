@@ -2,5 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    shellink_desktop_lib::run()
+    if std::env::args().nth(1).as_deref() == Some("mcp") {
+        shellink_desktop_lib::run_stdio();
+    } else {
+        shellink_desktop_lib::run();
+    }
 }

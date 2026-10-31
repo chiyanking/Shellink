@@ -13,8 +13,6 @@ export function rpc<T = unknown>(method: string, params: object = {}, timeoutMs 
   return invoke<T>('core_request', { method, params, timeoutMs })
 }
 export const onCoreEvent = (callback: (event: CoreEvent) => void) => listen<CoreEvent>('shellink:event', event => callback(event.payload))
-export const onDisconnect = (callback: (reason: string) => void) => listen<string>('shellink:disconnected', event => callback(event.payload))
-export async function reconnect() { if (isTauri()) await invoke('core_reconnect') }
 export function openDirectory(path: string) { return invoke('open_data_directory', { path }) }
 export function errorText(error: unknown) { return error instanceof Error ? error.message : String(error) }
 export function downloadJSON(name: string, data: unknown) {

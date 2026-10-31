@@ -28,7 +28,7 @@ import {
 } from 'lucide-react'
 import { Design, type Modal } from './context'
 import { connectionFrom, sessionFrom, emptyConnection, emptySession, type Connection, type Page, type Session } from './data'
-import { rpc, reconnect, onCoreEvent, onDisconnect, errorText, preference, savePreference, type Profile, type SessionRecord, type RuntimeInfo, type MCPInfo, type CallbackRecord } from './backend'
+import { rpc, onCoreEvent, errorText, preference, savePreference, type Profile, type SessionRecord, type RuntimeInfo, type MCPInfo, type CallbackRecord } from './backend'
 import { Badge, Button, Dialog, Hint, Input, Menu, Select, TooltipProvider } from './components/ui'
 import { cn } from './lib/utils'
 import Workspace from './Workspace'
@@ -122,10 +122,6 @@ export default function App() {
           if (alive && event.event !== 'session.data') { clearTimeout(timer); timer = setTimeout(() => { if (alive) void refresh() }, 100) }
         })
         if (!alive) { eventsOff(); return }; cleanups.push(eventsOff)
-        const disconnectOff = await onDisconnect(reason => {
-          if (alive) { readyRef.current = false; setCoreReady(false); setBackendError(reason) }
-        })
-        if (!alive) { disconnectOff(); return }; cleanups.push(disconnectOff)
         const result = await rpc<{ subscriptionId: string }>('events.subscribe', { replay: false })
         subscription = result.subscriptionId
         if (!alive) { await rpc('events.unsubscribe', { subscriptionId: subscription }); return }
@@ -137,9 +133,9 @@ export default function App() {
     const interval = setInterval(() => { if (alive && readyRef.current) void refresh() }, 4000)
     return () => { alive = false; readyRef.current = false; clearInterval(interval); clearTimeout(timer); cleanups.forEach(cleanup => cleanup()); if (subscription) void rpc('events.unsubscribe', { subscriptionId: subscription }).catch(() => {}) }
   }, [refresh, coreEpoch])
-  async function retryBackend() {
+  function retryBackend() {
     setLoading(true); setCoreReady(false); readyRef.current = false
-    try { await reconnect(); setCoreEpoch(epoch => epoch + 1) } catch (error) { setBackendError(errorText(error)); setLoading(false) }
+    setBackendError(''); setCoreEpoch(epoch => epoch + 1)
   }
   useEffect(() => { savePreference('tabs', tabs); savePreference('selectedSession', selectedSessionId) }, [tabs, selectedSessionId])
   useEffect(() => { savePreference('theme', theme); document.documentElement.classList.toggle('dark', theme === 'dark') }, [theme])
@@ -242,7 +238,7 @@ export default function App() {
               <span />
             </div>
             <div className="native-preview">
-              {loading ? '准备工作区' : backendError ? '连接中断' : 'DAEMON CONNECTED'} <span />
+              {loading ? '准备工作区' : backendError ? '连接中断' : 'DESKTOP CONNECTED'} <span />
             </div>
           </header>
           <div className="desktop-body">
@@ -455,12 +451,12 @@ export default function App() {
                   </Hint>
                   <span className="topbar-preview">
                     <span className="status-dot" />
-                    {backendError ? '连接中断' : loading ? '连接中' : '后台已连接'}
+                    {backendError ? '连接中断' : loading ? '连接中' : 'Desktop 已连接'}
                   </span>
                 </div>
               </header>
               <div className="main-scroll" data-ui-scroll-container>
-                {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接后台'}</strong><p>{backendError || '查找或启动本地服务，已有会话会继续运行。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
+                {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接 Desktop 核心'}</strong><p>{backendError || '正在初始化本地 Rust 核心。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
                 {page === 'workspace' && <Workspace />}
                 {page === 'sessions' && <SessionsPage />}
                 {page === 'connections' && <ConnectionsPage />}

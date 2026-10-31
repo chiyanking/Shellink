@@ -2243,24 +2243,6 @@ select {
   color: var(--muted-foreground);
   margin-top: 7px;
 }
-.cli-path {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  padding: 13px;
-  margin: 23px 0 15px;
-  font-size: 10px;
-}
-.cli-path > svg {
-  color: var(--muted-foreground);
-}
-.cli-path > .ui-badge {
-  margin-left: auto;
-}
-
 /* Activity history */
 .history-toolbar {
   padding-bottom: 17px;

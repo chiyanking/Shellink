@@ -1,149 +1,327 @@
-use serde_json::{json, Value};
-use std::{collections::HashMap, io::{BufRead, BufReader, Write}, path::PathBuf, process::{Child, ChildStdin, Command, Stdio}, sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc}, time::Duration};
-use tauri::{AppHandle, Emitter, Manager};
+use crate::{data::DataStore, mcp::Server, sessions::SessionManager};
+use serde_json::{Value, json};
+use std::{
+    collections::HashMap,
+    env,
+    path::PathBuf,
+    process::Command,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
+use tauri::{AppHandle, Manager};
 
-type Reply = Result<Value, String>;
-struct Transport {
-    child: Mutex<Child>, input: Mutex<ChildStdin>,
-    pending: Mutex<HashMap<u64, mpsc::Sender<Reply>>>, diagnostics: Mutex<String>,
-    alive: AtomicBool, retired: AtomicBool,
+pub type Reply = Result<Value, String>;
+
+pub struct Backend {
+    next_subscription: AtomicU64,
+    subscriptions: Mutex<HashMap<String, Subscription>>,
+    started: Instant,
 }
-impl Transport {
-    fn stop(&self) { self.retired.store(true, Ordering::SeqCst); self.alive.store(false, Ordering::SeqCst); let _ = self.child.lock().unwrap().kill(); let _ = self.child.lock().unwrap().wait(); }
+
+struct Subscription {
+    session_id: Option<String>,
+    replay: bool,
 }
-#[derive(Default)]
-pub struct Backend { transport: Mutex<Option<Arc<Transport>>>, next: AtomicU64 }
+
+impl Default for Backend {
+    fn default() -> Self {
+        Self {
+            next_subscription: AtomicU64::new(0),
+            subscriptions: Mutex::new(HashMap::new()),
+            started: Instant::now(),
+        }
+    }
+}
+
 impl Backend {
-    fn core_path(app: &AppHandle) -> Result<PathBuf, String> {
-        let suffix = if cfg!(windows) { ".exe" } else { "" };
-        #[cfg(debug_assertions)]
-        if let Some(path) = std::env::var_os("SHELLINK_CORE") { return Ok(path.into()); }
-        let mut candidates = vec![];
-        if let Ok(exe) = std::env::current_exe() { if let Some(dir) = exe.parent() { candidates.push(dir.join(format!("shellink-core{suffix}"))); } }
-        if let Ok(dir) = app.path().resource_dir() { candidates.push(dir.join(format!("shellink-core{suffix}"))); }
-        #[cfg(debug_assertions)]
-        candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries").join(format!("shellink-core-{}{suffix}", env!("SHELLINK_TARGET"))));
-        candidates.into_iter().find(|path| path.is_file()).ok_or_else(|| "未找到随包 Shellink 核心，请重新构建或安装应用。".into())
+    fn subscribe(&self, params: &Value) -> Result<Value, String> {
+        let id = format!(
+            "desktop-subscription-{}",
+            self.next_subscription.fetch_add(1, Ordering::Relaxed) + 1
+        );
+        let session_id = match params.get("sessionId") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .filter(|value| !value.is_empty())
+                    .ok_or("sessionId must be a non-empty string")?
+                    .to_owned(),
+            ),
+        };
+        let replay = params
+            .get("replay")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        self.subscriptions
+            .lock()
+            .unwrap()
+            .insert(id.clone(), Subscription { session_id, replay });
+        Ok(json!({"subscriptionId": id, "replay": replay}))
     }
-    fn connect(&self, app: &AppHandle) -> Result<Arc<Transport>, String> {
-        let mut current = self.transport.lock().unwrap();
-        if let Some(transport) = current.as_ref() {
-            if transport.alive.load(Ordering::SeqCst) && matches!(transport.child.lock().unwrap().try_wait(), Ok(None)) { return Ok(transport.clone()); }
-            let reason = transport.diagnostics.lock().unwrap().clone();
-            return Err(if reason.trim().is_empty() { "与后台的连接已断开，请重新连接。".into() } else { reason });
-        }
-        let mut command = Command::new(Self::core_path(app)?);
-        command.env("SHELLINK_HTTP_ENABLED", "false");
-        command.arg("desktop-bridge").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        #[cfg(windows)] { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
-        let mut child = command.spawn().map_err(|e| format!("无法启动桌面桥接: {e}"))?;
-        let input = child.stdin.take().ok_or("无法打开桥接输入")?;
-        let output = child.stdout.take().ok_or("无法打开桥接输出")?;
-        let diagnostics = child.stderr.take().ok_or("无法打开桥接诊断")?;
-        let transport = Arc::new(Transport { child: Mutex::new(child), input: Mutex::new(input), pending: Mutex::new(HashMap::new()), diagnostics: Mutex::new(String::new()), alive: AtomicBool::new(true), retired: AtomicBool::new(false) });
-        let log = transport.clone();
-        std::thread::spawn(move || { for line in BufReader::new(diagnostics).lines().map_while(Result::ok) { let mut text = log.diagnostics.lock().unwrap(); if text.len() > 8192 { text.clear(); } text.push_str(&line); text.push('\n'); } });
-        let reader = transport.clone(); let app = app.clone();
-        std::thread::spawn(move || {
-            for line in BufReader::new(output).lines() {
-                let Ok(line) = line else { break }; if line.len() > 32 << 20 { break; }
-                let Ok(value) = serde_json::from_str::<Value>(&line) else { break };
-                if let Some(event) = value.get("event") { if !reader.retired.load(Ordering::SeqCst) { let _ = app.emit("shellink:event", event); } continue; }
-                if let Some(id) = value.get("id").and_then(Value::as_u64) {
-                    if let Some(reply) = reader.pending.lock().unwrap().remove(&id) {
-                        let result = match value.get("error") { Some(error) => Err(error.get("message").and_then(Value::as_str).unwrap_or("后台请求失败").to_owned()), None => Ok(value.get("result").cloned().unwrap_or(Value::Null)) };
-                        let _ = reply.send(result);
-                    }
-                }
-            }
-            reader.alive.store(false, Ordering::SeqCst);
-            let diagnostic = reader.diagnostics.lock().unwrap().clone();
-            let reason = if diagnostic.trim().is_empty() { "与后台的连接已断开，请重新连接。".to_owned() } else { diagnostic };
-            for (_, reply) in reader.pending.lock().unwrap().drain() { let _ = reply.send(Err(reason.clone())); }
-            if !reader.retired.load(Ordering::SeqCst) { let _ = app.emit("shellink:disconnected", reason); }
-        });
-        *current = Some(transport.clone()); Ok(transport)
+
+    fn unsubscribe(&self, id: &str) -> Value {
+        json!({"removed": self.subscriptions.lock().unwrap().remove(id).is_some()})
     }
-    pub fn stop(&self) { if let Some(transport) = self.transport.lock().unwrap().take() { transport.stop(); } }
-    pub fn shutdown(&self, app: &AppHandle) {
-        // Desktop owns the runtime lifetime. Ask the current core to close its
-        // HTTP listener and all sessions before killing the bridge process.
-        // Do not call request() here: it would lazily start a runtime during
-        // application exit when the desktop never used the backend.
-        let existing = self.transport.lock().unwrap().clone();
-        if let Some(transport) = existing {
-            let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
-            let (reply, response) = mpsc::channel();
-            transport.pending.lock().unwrap().insert(id, reply);
-            let request = json!({ "id": id, "method": "system.stop", "params": {}, "timeoutMs": 2000 });
-            let written = { let mut input = transport.input.lock().unwrap(); writeln!(input, "{request}").and_then(|_| input.flush()) };
-            if written.is_ok() { let _ = response.recv_timeout(Duration::from_secs(2)); }
-            transport.pending.lock().unwrap().remove(&id);
-            let _ = app;
-        }
-        self.stop();
+
+    pub fn allows_event(&self, event: &Value) -> bool {
+        let session_id = event
+            .get("data")
+            .and_then(|data| data.get("sessionId"))
+            .and_then(Value::as_str);
+        self.subscriptions.lock().unwrap().values().any(|subscription| {
+            let replay = subscription.replay;
+            let session_matches = subscription
+                .session_id
+                .as_deref()
+                .is_none_or(|wanted| Some(wanted) == session_id);
+            session_matches && (replay || event.get("event").is_some())
+        })
     }
-    pub fn request(&self, app: &AppHandle, method: String, params: Value, timeout_ms: u64) -> Reply {
-        let transport = self.connect(app)?;
-        let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
-        let timeout_ms = timeout_ms.clamp(1000, 180_000);
-        let (reply, response) = mpsc::channel(); transport.pending.lock().unwrap().insert(id, reply);
-        let request = json!({ "id": id, "method": method, "params": params, "timeoutMs": timeout_ms });
-        let written = { let mut input = transport.input.lock().unwrap(); writeln!(input, "{request}").and_then(|_| input.flush()) };
-        if let Err(error) = written { transport.pending.lock().unwrap().remove(&id); transport.stop(); return Err(format!("桥接写入失败: {error}")); }
-        let result = response.recv_timeout(Duration::from_millis(timeout_ms + 16_000)).map_err(|_| "后台请求超时，请检查服务日志。".to_owned());
-        transport.pending.lock().unwrap().remove(&id);
-        result?
+
+    pub fn shutdown(&self, _app: &AppHandle) {
+        self.subscriptions.lock().unwrap().clear();
     }
 }
 
-#[tauri::command]
-pub async fn core_request(app: AppHandle, state: tauri::State<'_, Arc<Backend>>, method: String, params: Value, timeout_ms: Option<u64>) -> Reply {
-    if matches!(method.as_str(), "mcp.info" | "mcp.config") { if let Some(db)=app.try_state::<Option<crate::data::DataStore>>() { if let Some(db)=db.inner().as_ref() { let value=if method=="mcp.info"{db.mcp_info()}else{db.mcp_config(&params)}; if value.is_ok(){return value;} } } }
-    if method == "sessions.state" {
-        if let Some(db)=app.try_state::<Option<crate::data::DataStore>>() { if let Some(db)=db.inner().as_ref() { if let Some(id)=params.get("id").and_then(Value::as_str) { if let Ok(value)=db.session_state(id) { return Ok(value); } } } }
-    }
-    if method == "sessions.historyChunks" {
-        if let Some(db)=app.try_state::<Option<crate::data::DataStore>>() { if let Some(db)=db.inner().as_ref() { if let Some(id)=params.get("id").and_then(Value::as_str) { let since=params.get("since").and_then(Value::as_i64).unwrap_or(0); let limit=params.get("limit").and_then(Value::as_i64).unwrap_or(500); if let Ok(value)=db.history_chunks(id,since,limit) { return Ok(value); } } } }
-    }
-    if matches!(method.as_str(), "sessions.create" | "sessions.input" | "sessions.close") {
-        if let (Some(db), Some(manager)) = (app.try_state::<Option<crate::data::DataStore>>(), app.try_state::<Arc<crate::sessions::SessionManager>>()) {
-            if let Some(db)=db.inner().as_ref() {
-                let local=match method.as_str() {
-                    "sessions.create" => manager.create(&app,db,params.get("profileId").and_then(Value::as_str).ok_or("profileId is required")?,params.get("name").and_then(Value::as_str).unwrap_or(""),params.get("source").and_then(Value::as_str).unwrap_or("desktop"),params.get("mode").and_then(Value::as_str).unwrap_or("MANUAL"),params.get("cols").and_then(Value::as_i64).unwrap_or(0),params.get("rows").and_then(Value::as_i64).unwrap_or(0)),
-                    "sessions.input" => manager.input(db,params.get("id").and_then(Value::as_str).ok_or("id is required")?,params.get("text").and_then(Value::as_str).ok_or("text is required")?,params.get("appendNewline").and_then(Value::as_bool).unwrap_or(true)),
-                    _ => manager.close(db,params.get("id").and_then(Value::as_str).ok_or("id is required")?),
-                }; if local.is_ok(){return local;}
-            }
-        }
-    }
-    if matches!(method.as_str(), "profiles.list" | "profiles.get" | "profiles.create" | "profiles.update" | "profiles.delete" | "sessions.list") {
-        if let Some(store) = app.try_state::<Option<crate::data::DataStore>>() {
-            if let Some(store) = store.inner().as_ref() {
-                let local = match method.as_str() {
-                    "profiles.list" => store.profiles(None),
-                    "profiles.get" => params.get("id").and_then(Value::as_str).map_or_else(|| Err("id must be a string".into()), |id| store.profiles(Some(id))),
-                    "profiles.create" => store.profile_create(&params),
-                    "profiles.update" => params.get("id").and_then(Value::as_str).zip(params.get("profile")).map_or_else(|| Err("id and profile are required".into()), |(id,p)| store.profile_update(id,p)),
-                    "profiles.delete" => params.get("id").and_then(Value::as_str).map_or_else(|| Err("id must be a string".into()), |id| store.profile_delete(id)),
-                    _ => store.sessions(),
-                };
-                if local.is_ok() { return local; }
-            }
-        }
-    }
-    let backend = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || backend.request(&app, method, params, timeout_ms.unwrap_or(30_000))).await.map_err(|e| e.to_string())?
+fn required_string<'a>(params: &'a Value, key: &str) -> Result<&'a str, String> {
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{key} must be a non-empty string"))
 }
+
+fn optional_i64(params: &Value, key: &str, default: i64) -> Result<i64, String> {
+    match params.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(value) => value
+            .as_i64()
+            .ok_or_else(|| format!("{key} must be an integer")),
+    }
+}
+
+fn system_status(
+    app: &AppHandle,
+    db: &DataStore,
+    manager: &SessionManager,
+    server: &Server,
+    backend: &Backend,
+) -> Reply {
+    let sessions = manager.list(db)?;
+    let active_sessions = sessions
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item.get("active").and_then(Value::as_bool).unwrap_or(false))
+                .count()
+        })
+        .unwrap_or(0);
+    let mcp = server.info(db)?;
+    let http_enabled = mcp.get("running").and_then(Value::as_bool).unwrap_or(false);
+    let http_url = if http_enabled {
+        mcp.get("url")
+            .and_then(Value::as_str)
+            .map(|url| url.trim_end_matches("/shellink/mcp").to_owned())
+    } else {
+        None
+    };
+    Ok(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "commit": "unknown",
+        "protocolVersion": 1,
+        "pid": std::process::id(),
+        "uptimeSeconds": backend.started.elapsed().as_secs(),
+        "socketPath": Value::Null,
+        "httpEnabled": http_enabled,
+        "httpUrl": http_url,
+        "activeSessions": active_sessions,
+        "app": app.package_info().version.to_string(),
+    }))
+}
+
+fn desktop_info(
+    app: &AppHandle,
+    db: &DataStore,
+    manager: &SessionManager,
+    server: &Server,
+    backend: &Backend,
+) -> Reply {
+    let command = std::env::current_exe()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let shell = if cfg!(windows) {
+        "powershell.exe".to_owned()
+    } else {
+        env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
+    };
+    let status = system_status(app, db, manager, server, backend)?;
+    Ok(json!({
+        "status": status,
+        "dataHome": db.data_home().to_string_lossy(),
+        "logPath": db.data_home().join("shellink.log").to_string_lossy(),
+        "command": command,
+        "defaultShell": shell,
+        "platform": std::env::consts::OS,
+    }))
+}
+
+fn dispatch(app: &AppHandle, backend: &Backend, method: &str, params: &Value) -> Reply {
+    let db = app.state::<DataStore>();
+    let manager = app.state::<Arc<SessionManager>>();
+    let server = app.state::<Server>();
+    match method {
+        "desktop.info" => desktop_info(app, &db, &manager, &server, backend),
+        "system.hello" => Ok(json!({
+            "serviceVersion": env!("CARGO_PKG_VERSION"),
+            "serviceCommit": "unknown",
+            "protocolVersion": 1,
+            "capabilities": ["system.hello", "system.ping", "system.status", "system.stop", "profiles.list", "profiles.get", "profiles.create", "profiles.update", "profiles.delete", "sessions.list", "sessions.create", "sessions.state", "sessions.history", "sessions.input", "sessions.mode", "sessions.resize", "sessions.close", "sessions.removeRecord", "sessions.rename", "sessions.replay", "sessions.historyChunks", "webhooks.list", "webhooks.create", "webhooks.delete", "webhooks.messages", "webhooks.clearMessages", "events.subscribe", "events.unsubscribe", "mcp.info", "mcp.config"]
+        })),
+        "system.ping" => Ok(json!({"pong": true, "at": now()})),
+        "system.status" => system_status(app, &db, &manager, &server, backend),
+        "system.stop" => {
+            server.stop();
+            manager.shutdown(&db);
+            Ok(json!({"stopping": true}))
+        }
+        "mcp.info" => server.info(&db),
+        "mcp.config" => server.update_config(app, &db, params),
+        "profiles.list" => db.profiles(None),
+        "profiles.get" => db.profiles(Some(required_string(params, "id")?)),
+        "profiles.create" => db.profile_create(params),
+        "profiles.update" => db.profile_update(
+            required_string(params, "id")?,
+            params.get("profile").ok_or("profile is required")?,
+        ),
+        "profiles.delete" => db.profile_delete(required_string(params, "id")?),
+        "sessions.list" => manager.list(&db),
+        "sessions.create" => {
+            let mode = params.get("mode").and_then(Value::as_str).unwrap_or("AUTO");
+            let source = params
+                .get("source")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            if name.chars().count() > 80 {
+                return Err("name must be at most 80 characters".into());
+            }
+            manager.create(
+                app,
+                &db,
+                required_string(params, "profileId")?,
+                name,
+                source,
+                mode,
+                optional_i64(params, "cols", 0)?,
+                optional_i64(params, "rows", 0)?,
+            )
+        }
+        "sessions.state" => manager.state(&db, required_string(params, "id")?),
+        "sessions.history" => manager.history(
+            &db,
+            required_string(params, "id")?,
+            optional_i64(params, "since", 0)?,
+            optional_i64(params, "limit", 2000)?,
+        ),
+        "sessions.historyChunks" => manager.history(
+            &db,
+            required_string(params, "id")?,
+            optional_i64(params, "since", 0)?,
+            optional_i64(params, "limit", 500)?,
+        ),
+        "sessions.input" => manager.input(
+            &db,
+            required_string(params, "id")?,
+            params
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or("text must be a string")?,
+            params
+                .get("appendNewline")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            params
+                .get("manual")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ),
+        "sessions.mode" => manager.set_mode(
+            &db,
+            required_string(params, "id")?,
+            required_string(params, "mode")?,
+        ),
+        "sessions.resize" => manager.resize(
+            &db,
+            required_string(params, "id")?,
+            optional_i64(params, "cols", 0)?,
+            optional_i64(params, "rows", 0)?,
+        ),
+        "sessions.close" => manager.close(&db, required_string(params, "id")?),
+        "sessions.removeRecord" => manager.remove(&db, required_string(params, "id")?),
+        "sessions.rename" => manager.rename(
+            &db,
+            required_string(params, "id")?,
+            required_string(params, "name")?,
+        ),
+        "sessions.replay" => manager.replay(&db, required_string(params, "id")?),
+        "webhooks.list" => db.webhooks(),
+        "webhooks.create" => db.webhook_create(params),
+        "webhooks.delete" => db.webhook_delete(required_string(params, "id")?),
+        "webhooks.messages" => Ok(server.messages()),
+        "webhooks.clearMessages" => {
+            server.clear_messages();
+            Ok(json!({"ok": true}))
+        }
+        "events.subscribe" => backend.subscribe(params),
+        "events.unsubscribe" => Ok(backend.unsubscribe(required_string(params, "subscriptionId")?)),
+        _ => Err(format!("Unknown method: {method}")),
+    }
+}
+
+fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
 #[tauri::command]
-pub fn core_reconnect(state: tauri::State<'_, Arc<Backend>>) { state.stop(); }
+pub async fn core_request(
+    app: AppHandle,
+    state: tauri::State<'_, Arc<Backend>>,
+    method: String,
+    params: Value,
+    timeout_ms: Option<u64>,
+) -> Reply {
+    let backend = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = timeout_ms;
+        dispatch(&app, &backend, &method, &params)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 pub fn open_data_directory(path: String) -> Result<(), String> {
-    // The frontend obtains this directory from desktop.info; only directories
-    // can be opened, and arguments never pass through a shell.
-    let path = PathBuf::from(path); if !path.is_dir() { return Err("目录不存在".into()); }
-    #[cfg(target_os = "macos")] let result = Command::new("open").arg(path).spawn();
-    #[cfg(target_os = "windows")] let result = Command::new("explorer.exe").arg(path).spawn();
-    #[cfg(target_os = "linux")] let result = Command::new("xdg-open").arg(path).spawn();
-    result.map(|_| ()).map_err(|e| e.to_string())
+    let path = PathBuf::from(path);
+    if !path.is_dir() {
+        return Err("目录不存在".into());
+    }
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(path).spawn();
+    #[cfg(target_os = "windows")]
+    let result = Command::new("explorer.exe").arg(path).spawn();
+    #[cfg(target_os = "linux")]
+    let result = Command::new("xdg-open").arg(path).spawn();
+    result.map(|_| ()).map_err(|error| error.to_string())
 }
