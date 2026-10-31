@@ -1,23 +1,33 @@
 use crate::data::{DataStore, LaunchProfile};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     io::{Read, Write},
     path::PathBuf,
-    process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
+type SessionInput = Arc<Mutex<Box<dyn Write + Send>>>;
+
 struct Live {
-    child: Child,
-    input: Arc<Mutex<std::process::ChildStdin>>,
+    child: Box<dyn Child + Send + Sync>,
+    input: SessionInput,
+    pty: Box<dyn MasterPty + Send>,
+    output_finished: Arc<AtomicBool>,
     key_path: Option<PathBuf>,
-    ssh: bool,
+}
+
+struct SpawnedSession {
+    live: Live,
+    output: Box<dyn Read + Send>,
+    target: String,
+    auth_secret: Option<String>,
 }
 
 pub struct SessionManager {
@@ -58,14 +68,13 @@ impl SessionManager {
             crate::data::session_now(),
             self.next_id.fetch_add(1, Ordering::Relaxed)
         );
-        let (mut child, target, key_path, auth_secret, ssh) = spawn_profile(db, &profile, &id)?;
-        let auth_secret = auth_secret.map(|secret| Arc::new(Mutex::new(Some(secret))));
-        let mut stdout = child.stdout.take().ok_or("无法打开 session 输出")?;
-        let mut stderr = child.stderr.take().ok_or("无法打开 session 错误输出")?;
-        let input = Arc::new(Mutex::new(
-            child.stdin.take().ok_or("无法打开 session 输入")?,
-        ));
-        db.insert_session(
+        let SpawnedSession {
+            mut live,
+            mut output,
+            target,
+            auth_secret,
+        } = spawn_profile(db, &profile, &id, cols, rows)?;
+        if let Err(error) = db.insert_session(
             &id,
             profile_id,
             &profile.name,
@@ -75,20 +84,27 @@ impl SessionManager {
             name.trim(),
             source,
             mode,
-        )?;
+        ) {
+            let _ = live.child.kill();
+            let _ = live.child.wait();
+            cleanup_key(live.key_path.take());
+            return Err(error);
+        }
         let output_app = app.clone();
         let output_id = id.clone();
-        let output_input = input.clone();
-        let output_secret = auth_secret.clone();
-        thread::spawn(move || read_output(&output_app, &output_id, &mut stdout, &output_input, output_secret));
-        let error_app = app.clone();
-        let error_id = id.clone();
-        let error_input = input.clone();
-        thread::spawn(move || read_output(&error_app, &error_id, &mut stderr, &error_input, auth_secret));
-        self.live
-            .lock()
-            .unwrap()
-            .insert(id.clone(), Live { child, input, key_path, ssh });
+        let output_input = live.input.clone();
+        let output_finished = live.output_finished.clone();
+        self.live.lock().unwrap().insert(id.clone(), live);
+        thread::spawn(move || {
+            read_output(
+                &output_app,
+                &output_id,
+                &mut output,
+                &output_input,
+                auth_secret,
+            );
+            output_finished.store(true, Ordering::Release);
+        });
         let event = json!({"event":"session.created","data":{"sessionId":id}});
         if app
             .try_state::<std::sync::Arc<crate::bridge::Backend>>()
@@ -122,7 +138,10 @@ impl SessionManager {
         }
         let mut live = self.live.lock().unwrap();
         let session = live.get_mut(id).ok_or("Session not found")?;
-        let mut input = session.input.lock().map_err(|_| "Session input unavailable")?;
+        let mut input = session
+            .input
+            .lock()
+            .map_err(|_| "Session input unavailable")?;
         input
             .write_all(text.as_bytes())
             .map_err(|e| e.to_string())?;
@@ -147,11 +166,10 @@ impl SessionManager {
             return Err("Terminal dimensions are invalid".into());
         }
         if let Some(session) = self.live.lock().unwrap().get_mut(id) {
-            if session.ssh {
-                let mut input = session.input.lock().map_err(|_| "Session input unavailable")?;
-                write!(input, "stty cols {cols} rows {rows}\n").map_err(|e| e.to_string())?;
-                input.flush().map_err(|e| e.to_string())?;
-            }
+            session
+                .pty
+                .resize(terminal_size(cols, rows))
+                .map_err(|e| e.to_string())?;
         }
         db.update_session_size(id, cols, rows)
     }
@@ -204,8 +222,10 @@ impl SessionManager {
         let mut ended = Vec::new();
         let mut live = self.live.lock().unwrap();
         for (id, session) in live.iter_mut() {
-            if let Ok(Some(status)) = session.child.try_wait() {
-                ended.push((id.clone(), status.code(), session.key_path.clone()));
+            if session.output_finished.load(Ordering::Acquire) {
+                if let Ok(Some(status)) = session.child.try_wait() {
+                    ended.push((id.clone(), status.exit_code(), session.key_path.clone()));
+                }
             }
         }
         for (id, _, _) in &ended {
@@ -214,7 +234,7 @@ impl SessionManager {
         drop(live);
         for (id, code, key_path) in ended {
             let _ = db.update_session_state(&id, "DISCONNECTED", Some("Process exited"));
-            let _ = db.set_exit_code(&id, code);
+            let _ = db.set_exit_code(&id, Some(code as i32));
             cleanup_key(key_path);
         }
     }
@@ -224,32 +244,33 @@ fn spawn_profile(
     db: &DataStore,
     profile: &LaunchProfile,
     session_id: &str,
-) -> Result<(Child, String, Option<PathBuf>, Option<String>, bool), String> {
+    cols: i64,
+    rows: i64,
+) -> Result<SpawnedSession, String> {
     let mut command;
     let target;
     let mut key_path = None;
     let mut auth_secret = None;
-    let ssh;
     if profile.connect_type == "command" {
-        ssh = false;
         let script = profile.command.clone().unwrap_or_default();
         if script.trim().is_empty() {
             return Err("Command profile has no command".into());
         }
         #[cfg(windows)]
         {
-            command = Command::new(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()));
+            command =
+                CommandBuilder::new(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()));
             command.args(["/D", "/S", "/C", &script]);
         }
         #[cfg(not(windows))]
         {
-            command = Command::new("/bin/sh");
+            command = CommandBuilder::new("/bin/sh");
             command.args(["-lc", &script]);
         }
         target = script;
     } else if profile.connect_type == "ssh" {
-        ssh = true;
-        command = Command::new(if cfg!(windows) { "ssh.exe" } else { "ssh" });
+        command = CommandBuilder::new(if cfg!(windows) { "ssh.exe" } else { "ssh" });
+        command.env("SSH_ASKPASS_REQUIRE", "never");
         let port = profile.port.to_string();
         command.args([
             "-tt",
@@ -285,12 +306,7 @@ fn spawn_profile(
                     .transpose()?;
             }
             let path_string = path.to_string_lossy().into_owned();
-            command.args([
-                "-i",
-                path_string.as_str(),
-                "-o",
-                "IdentitiesOnly=yes",
-            ]);
+            command.args(["-i", path_string.as_str(), "-o", "IdentitiesOnly=yes"]);
         } else if profile.auth_type == "password" {
             auth_secret = profile
                 .password
@@ -306,72 +322,240 @@ fn spawn_profile(
     } else {
         return Err("connectType must be ssh or command".into());
     }
-    command
-        .env("TERM", &profile.term)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    command
-        .spawn()
-        .map(|child| (child, target, key_path, auth_secret, ssh))
-        .map_err(|e| format!("启动 session 失败: {e}"))
+    command.env("TERM", &profile.term);
+    match spawn_terminal(command, cols, rows) {
+        Ok((live, output)) => Ok(SpawnedSession {
+            live: Live { key_path, ..live },
+            output,
+            target,
+            auth_secret,
+        }),
+        Err(error) => {
+            cleanup_key(key_path);
+            Err(error)
+        }
+    }
+}
+
+fn terminal_size(cols: i64, rows: i64) -> PtySize {
+    PtySize {
+        cols: cols as u16,
+        rows: rows as u16,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+fn spawn_terminal(
+    command: CommandBuilder,
+    cols: i64,
+    rows: i64,
+) -> Result<(Live, Box<dyn Read + Send>), String> {
+    let pair = native_pty_system()
+        .openpty(terminal_size(cols, rows))
+        .map_err(|e| format!("打开终端失败: {e}"))?;
+    let output = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let input = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let child = pair
+        .slave
+        .spawn_command(command)
+        .map_err(|e| format!("启动 session 失败: {e}"))?;
+    drop(pair.slave);
+    Ok((
+        Live {
+            child,
+            input: Arc::new(Mutex::new(input)),
+            pty: pair.master,
+            output_finished: Arc::new(AtomicBool::new(false)),
+            key_path: None,
+        },
+        output,
+    ))
 }
 
 fn read_output(
     app: &AppHandle,
     id: &str,
     stream: &mut impl Read,
-    input: &Arc<Mutex<std::process::ChildStdin>>,
-    auth_secret: Option<Arc<Mutex<Option<String>>>>,
+    input: &SessionInput,
+    auth_secret: Option<String>,
 ) {
+    let mut auth = AuthResponder {
+        secret: auth_secret,
+        pending: String::new(),
+    };
     let mut buf = [0u8; 8192];
+    let mut pending = Vec::new();
     loop {
         match stream.read(&mut buf) {
             Ok(0) | Err(_) => break,
             Ok(n) => {
-                maybe_answer_auth(input, auth_secret.as_ref(), &buf[..n]);
-                emit_output(app, id, &buf[..n]);
+                pending.extend_from_slice(&buf[..n]);
+                let valid = match std::str::from_utf8(&pending) {
+                    Ok(_) => pending.len(),
+                    Err(error) if error.error_len().is_none() => error.valid_up_to(),
+                    Err(_) => pending.len(),
+                };
+                if valid == 0 {
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&pending[..valid]).into_owned();
+                pending.drain(..valid);
+                auth.answer(input, &text);
+                emit_output(app, id, &text);
             }
         }
     }
+    if !pending.is_empty() {
+        emit_output(app, id, &String::from_utf8_lossy(&pending));
+    }
 }
 
-fn emit_output(app: &AppHandle, id: &str, bytes: &[u8]) {
-    let text = String::from_utf8_lossy(bytes).into_owned();
+fn emit_output(app: &AppHandle, id: &str, text: &str) {
     let db = app.state::<DataStore>();
-    let _ = db.add_output(id, &text);
-    let _ = db.update_session_state(id, "OUTPUTTING", None);
-    let event = json!({"event":"session.output","data":{"sessionId":id,"direction":"output","raw":text,"plain":text}});
+    let Ok(seq) = db.add_output(id, text) else {
+        return;
+    };
+    let event = json!({"event":"session.data","seq":seq,"data":{"sessionId":id,"direction":"output","raw":text,"plain":text,"seq":seq}});
     if app
-        .try_state::<std::sync::Arc<crate::bridge::Backend>>()
+        .try_state::<Arc<crate::bridge::Backend>>()
         .is_none_or(|backend| backend.allows_event(&event))
     {
         let _ = app.emit("shellink:event", event);
     }
 }
 
-fn maybe_answer_auth(
-    input: &Arc<Mutex<std::process::ChildStdin>>,
-    auth_secret: Option<&Arc<Mutex<Option<String>>>>,
-    bytes: &[u8],
-) {
-    let Some(auth_secret) = auth_secret else { return };
-    let text = String::from_utf8_lossy(bytes).to_ascii_lowercase();
-    if !(text.contains("password:") || text.contains("passphrase") || text.contains("password for")) {
-        return;
-    }
-    let Ok(mut secret) = auth_secret.lock() else { return };
-    let Some(value) = secret.take() else { return };
-    drop(secret);
-    if let Ok(mut input) = input.lock() {
-        let _ = input.write_all(value.as_bytes());
-        let _ = input.write_all(b"\n");
-        let _ = input.flush();
+struct AuthResponder {
+    secret: Option<String>,
+    pending: String,
+}
+
+impl AuthResponder {
+    fn answer(&mut self, input: &SessionInput, text: &str) {
+        if self.secret.is_none() {
+            return;
+        }
+        self.pending.push_str(text);
+        let prompt = self.pending.to_ascii_lowercase();
+        let last_line = prompt.rsplit(['\r', '\n']).next().unwrap_or("").trim_end();
+        if last_line.ends_with(':')
+            && (last_line.contains("password") || last_line.contains("passphrase"))
+        {
+            if let Ok(mut input) = input.lock() {
+                if let Some(secret) = self.secret.take() {
+                    let _ = input.write_all(secret.as_bytes());
+                    let _ = input.write_all(b"\n");
+                    let _ = input.flush();
+                }
+            }
+            self.pending.clear();
+        } else if self.pending.len() > 4096 {
+            // Retain only the current prompt line, including split prompts.
+            self.pending = self
+                .pending
+                .rsplit(['\r', '\n'])
+                .next()
+                .unwrap_or("")
+                .chars()
+                .rev()
+                .take(512)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+        }
     }
 }
 
 fn cleanup_key(path: Option<PathBuf>) {
     if let Some(path) = path {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn authentication_handles_split_prompts_and_answers_only_once() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let input: SessionInput = Arc::new(Mutex::new(Box::new(Capture(captured.clone()))));
+        let mut auth = AuthResponder {
+            secret: Some("test-secret".into()),
+            pending: String::new(),
+        };
+        auth.answer(&input, "Welcome\r\nuser@host's pass");
+        assert!(captured.lock().unwrap().is_empty());
+        auth.answer(&input, "word: ");
+        auth.answer(&input, "\r\nuser@host's password: ");
+        assert_eq!(&*captured.lock().unwrap(), b"test-secret\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminal_supports_tty_authentication_and_native_resize() {
+        use std::{sync::mpsc, time::Duration};
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args([
+            "-c",
+            r#"
+            test -t 0 && test -t 1 || exit 2
+            stty -echo
+            printf 'Password: ' > /dev/tty
+            IFS= read -r answer < /dev/tty
+            test "$answer" = 'test-secret' || exit 3
+            printf '\nAUTH_OK\n'
+            stty size
+            exit 7
+        "#,
+        ]);
+        let (mut live, mut output) = spawn_terminal(command, 120, 36).unwrap();
+        live.pty.resize(terminal_size(100, 30)).unwrap();
+        let input = live.input.clone();
+        let (sender, receiver) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let mut auth = AuthResponder {
+                secret: Some("test-secret".into()),
+                pending: String::new(),
+            };
+            let mut all = String::new();
+            let mut bytes = [0u8; 1024];
+            while let Ok(n) = output.read(&mut bytes) {
+                if n == 0 {
+                    break;
+                }
+                let text = String::from_utf8_lossy(&bytes[..n]);
+                auth.answer(&input, &text);
+                all.push_str(&text);
+            }
+            let _ = sender.send(all);
+        });
+        let result = receiver.recv_timeout(Duration::from_secs(5));
+        if result.is_err() {
+            let _ = live.child.kill();
+        }
+        let status = live.child.wait().unwrap();
+        reader.join().unwrap();
+        let output = result.expect("PTY authentication timed out");
+        assert_eq!(status.exit_code(), 7, "{output}");
+        assert!(output.contains("AUTH_OK"), "{output}");
+        assert!(output.contains("30 100"), "{output}");
+        assert!(
+            !output.contains("test-secret"),
+            "secret was echoed by terminal"
+        );
     }
 }

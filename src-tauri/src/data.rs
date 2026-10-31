@@ -165,7 +165,7 @@ impl DataStore {
             Ok(json!({"id":r.get::<_,String>(0)?,"state":r.get::<_,String>(1)?,"mode":r.get::<_,String>(2)?,"closedAt":r.get::<_,Option<i64>>(3)?,"closeReason":r.get::<_,Option<String>>(4)?,"exitCode":r.get::<_,Option<i64>>(5)?,"active":r.get::<_,String>(1)? != "DISCONNECTED","lastSeq":r.get::<_,i64>(6)?,"recentOutput":recent}))
         }).optional().map_err(|e|e.to_string())?.ok_or_else(||"Session not found".into())
     }
-    pub fn add_output(&self, id: &str, text: &str) -> Result<(), String> {
+    pub fn add_output(&self, id: &str, text: &str) -> Result<i64, String> {
         let c = self.conn.lock().unwrap();
         let seq: i64 = c
             .query_row(
@@ -174,7 +174,9 @@ impl DataStore {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,text,0,now()]).map_err(|e|e.to_string()).map(|_|())
+        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,text,0,now()]).map_err(|e|e.to_string())?;
+        c.execute("UPDATE sessions SET state='OUTPUTTING' WHERE id=? AND state!='DISCONNECTED'", [id]).map_err(|e| e.to_string())?;
+        Ok(seq)
     }
     pub fn mcp_info(&self) -> Result<Value, String> {
         let path = self.data_home.join("mcp.json");
@@ -345,15 +347,16 @@ impl DataStore {
         if !exists {
             return Err("Session not found".into());
         }
-        let mut statement = c.prepare("SELECT data_raw FROM history_chunks WHERE session_id=? AND direction='output' ORDER BY seq").map_err(|e| e.to_string())?;
+        let mut statement = c.prepare("SELECT data_raw,seq FROM history_chunks WHERE session_id=? AND direction='output' ORDER BY seq").map_err(|e| e.to_string())?;
         let rows = statement
-            .query_map([id], |row| row.get::<_, String>(0))
+            .query_map([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
             .map_err(|e| e.to_string())?;
         let mut raw = String::new();
         let mut cursor = 0;
         for row in rows {
-            raw.push_str(&row.map_err(|e| e.to_string())?);
-            cursor += 1;
+            let (text, seq) = row.map_err(|e| e.to_string())?;
+            raw.push_str(&text);
+            cursor = seq;
         }
         Ok(json!({"raw":raw,"cursor":cursor}))
     }
@@ -819,6 +822,21 @@ mod tests {
         ));
         fs::create_dir(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn replay_cursor_tracks_output_sequence_with_interleaved_input() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
+        db.insert_session("test", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
+        assert_eq!(db.add_output("test", "prompt> ").unwrap(), 1);
+        db.add_input("test", "pwd\n").unwrap();
+        assert_eq!(db.add_output("test", "/tmp\n").unwrap(), 3);
+        assert_eq!(db.replay("test").unwrap(), json!({"raw":"prompt> /tmp\n", "cursor":3}));
+        db.update_session_state("test", "DISCONNECTED", Some("Process exited")).unwrap();
+        db.add_output("test", "final output").unwrap();
+        assert_eq!(db.session_state("test").unwrap()["active"], false);
     }
 
     #[test]

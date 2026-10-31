@@ -108,7 +108,7 @@ export default function App() {
         if (!mapped.some(item => item.id === record.profileId)) mapped.push({ ...emptyConnection, id: record.profileId, name: record.profileName || '已删除连接', host: record.target, archived: true })
       }
       setRuntime(info); setConnections(mapped); setSessions(records.map(sessionFrom)); setMcp(mcpInfo); setMessages(callbacks); if (readyRef.current) setBackendError('')
-      setTabs(current => current.filter(id => records.some(record => record.id === id && record.active)))
+      setTabs(current => current.filter(id => records.some(record => record.id === id)))
       setNewSessionId(current => profiles.some(p => p.id === current) ? current : profiles[0]?.id ?? '')
     } catch (error) { setBackendError(errorText(error)) } finally { setLoading(false); refreshBusy.current = false }
   }, [])
@@ -447,7 +447,7 @@ export default function App() {
               </header>
               <div className="main-scroll" data-ui-scroll-container>
                 {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接 Desktop 核心'}</strong><p>{backendError || '正在初始化本地 Rust 核心。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
-                {page === 'workspace' && <Workspace />}
+                <div hidden={page !== 'workspace'}><Workspace /></div>
                 {page === 'sessions' && <SessionsPage />}
                 {page === 'connections' && <ConnectionsPage />}
                 {page === 'integrations' && <IntegrationsPage />}

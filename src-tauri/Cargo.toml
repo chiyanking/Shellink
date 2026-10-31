@@ -20,6 +20,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 aes-gcm = "0.10"
 base64 = "0.22"
 rand = "0.9"
+portable-pty = "0.8.1"
 
 [profile.release]
 codegen-units = 1

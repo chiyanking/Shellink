@@ -14,7 +14,7 @@ The Rust core is part of the Desktop process. Closing the main window stops ever
 - Incoming Webhook capture at `/shellink/webhook/callback`.
 - Native Desktop data-directory and lifecycle controls.
 
-SSH sessions use the platform OpenSSH client. Password and key passphrase prompts are answered from the encrypted profile fields when the remote client asks for them. SSH private keys are written to a temporary private file for the lifetime of the session and removed when it ends.
+Local and SSH sessions run in a native pseudo-terminal (PTY), supporting interactive password prompts, terminal controls, and window resizing. SSH sessions use the platform OpenSSH client. Password and key passphrase prompts are answered from the encrypted profile fields when the remote client asks for them. SSH private keys are written to a temporary private file for the lifetime of the session and removed when it ends.
 
 ## Requirements
 
@@ -34,6 +34,7 @@ The regular frontend commands remain available for browser-only work:
 ```sh
 npm run dev
 npm run build
+npm run test:terminal
 ```
 
 Rust checks and tests run from the Tauri project:

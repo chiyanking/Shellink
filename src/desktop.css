@@ -1083,6 +1083,19 @@ select {
   font: 11px/1.8 var(--font-mono);
   color: var(--terminal-foreground);
 }
+/* Keep the viewport independent of xterm's measured content height. */
+.terminal-output.xterm-host {
+  flex: none;
+  height: clamp(260px, 52vh, 640px);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+/* FitAddon measures this unpadded box, excluding the outer gutter. */
+.terminal-viewport,
+.terminal-viewport > .xterm {
+  height: 100%;
+}
 .terminal-welcome {
   display: flex;
   gap: 10px;

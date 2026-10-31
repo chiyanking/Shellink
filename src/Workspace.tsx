@@ -25,9 +25,11 @@ import {
   X,
 } from 'lucide-react'
 import { useDesign } from './context'
-import { emptyConnection, sessionStatus, type Connection, type Session } from './data'
+import { emptyConnection, sessionStatus, type Session } from './data'
+import { onCoreEvent, rpc } from './backend'
 import { Badge, Button, Hint, Menu } from './components/ui'
 import { cn } from './lib/utils'
+import { createTerminalInput } from './terminal-input'
 
 export function PageHeading({
   eyebrow,
@@ -52,40 +54,66 @@ export function PageHeading({
   )
 }
 
-function TerminalContent({ session }: { connection: Connection; session: Session }) {
-  const { coreEpoch, manual, font, fontSize, notify } = useDesign()
+function TerminalContent({ session }: { session: Session }) {
+  const { coreEpoch, font, fontSize, notify } = useDesign()
+  const control = useRef({ manual: false, active: false })
+  control.current = { manual: session.mode === 'MANUAL', active: session.status !== 'ended' }
   const host = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!host.current || !session.id) return
     let alive = true
     const terminal = new XTerm({ convertEol: true, cursorBlink: true, fontFamily: `"${font}", monospace`, fontSize: Number(fontSize), theme: { background: '#101316', foreground: '#d9e0df' } })
-    const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.current); fit.fit()
+    const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.current)
     let replaySeq = 0
     const buffered: { seq: number; raw: string }[] = []
     let replaying = true
     let dispose: (() => void) | undefined
-    let resizeObserver: ResizeObserver | undefined
+    let resizeFrame = 0
+    let sentCols = 0, sentRows = 0
+    const resizeTerminal = () => {
+      if (!alive || !host.current?.clientWidth || !host.current.clientHeight) return
+      const size = fit.proposeDimensions()
+      if (!size) return
+      const cols = Math.max(20, Math.min(500, size.cols))
+      const rows = Math.max(5, Math.min(200, size.rows))
+      if (terminal.cols !== cols || terminal.rows !== rows) terminal.resize(cols, rows)
+      if (control.current.active && (cols !== sentCols || rows !== sentRows)) {
+        sentCols = cols; sentRows = rows
+        void rpc('sessions.resize', { id: session.id, cols, rows }).catch(() => {})
+      }
+    }
+    const resizeObserver = new ResizeObserver(() => {
+      cancelAnimationFrame(resizeFrame)
+      resizeFrame = requestAnimationFrame(resizeTerminal)
+    })
+    resizeObserver.observe(host.current)
+    // Parse replay at the visible dimensions, rather than xterm's default 80×24.
+    resizeTerminal()
+    const sendInput = createTerminalInput(
+      text => rpc('sessions.input', { id: session.id, text, manual: true, appendNewline: false }),
+      error => { if (alive) notify(String(error)) },
+    )
+    const input = terminal.onData(data => {
+      if (control.current.manual && control.current.active) sendInput(data)
+    })
     void (async () => {
-      const { onCoreEvent, rpc } = await import('./backend')
-      dispose = await onCoreEvent(event => {
+      const off = await onCoreEvent(event => {
         if (!alive || event.event !== 'session.data' || event.data.sessionId !== session.id || event.data.direction !== 'output' || typeof event.data.raw !== 'string') return
         const seq = Number(event.data.seq ?? event.seq ?? 0)
         if (replaying) buffered.push({ seq, raw: event.data.raw })
         else if (seq > replaySeq) { terminal.write(event.data.raw); replaySeq = seq }
       })
+      if (!alive) { off(); return }
+      dispose = off
       const replay = await rpc<{ raw: string; cursor: number }>('sessions.replay', { id: session.id }).catch(error => { if (alive) notify(String(error)); return null })
       if (!alive) return
       if (replay) { terminal.write(replay.raw); replaySeq = replay.cursor }
       replaying = false
       buffered.sort((a, b) => a.seq - b.seq).forEach(item => { if (item.seq > replaySeq) { terminal.write(item.raw); replaySeq = item.seq } })
-      resizeObserver = new ResizeObserver(() => { fit.fit(); const { cols, rows } = terminal; void rpc('sessions.resize', { id: session.id, cols, rows }).catch(() => {}) })
-      resizeObserver.observe(host.current!)
-      const { cols, rows } = terminal; void rpc('sessions.resize', { id: session.id, cols, rows }).catch(() => {})
-      terminal.onData(data => { if (manual) void rpc('sessions.input', { id: session.id, text: data, manual: true, appendNewline: false }).catch(error => notify(String(error))) })
-    })()
-    return () => { alive = false; dispose?.(); resizeObserver?.disconnect(); terminal.dispose() }
-  }, [session.id, manual, font, fontSize, coreEpoch, notify])
-  return <div ref={host} className="terminal-output xterm-host" aria-label={`${session.name} 终端`} />
+    })().catch(error => { if (alive) notify(String(error)) })
+    return () => { alive = false; dispose?.(); resizeObserver.disconnect(); cancelAnimationFrame(resizeFrame); input.dispose(); terminal.dispose() }
+  }, [session.id, font, fontSize, coreEpoch, notify])
+  return <div className="terminal-output xterm-host" aria-label={`${session.name} 终端`}><div ref={host} className="terminal-viewport" /></div>
 }
 
 function TerminalPanel({ session, secondary = false }: { session: Session; secondary?: boolean }) {
@@ -120,7 +148,8 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           </div>
         ) : (
           tabs.map((id) => {
-            const item = sessions.find((value) => value.id === id)!
+            const item = sessions.find((value) => value.id === id)
+            if (!item) return null
             return (
               <div key={id} className={cn('session-tab', selectedSession.id === id && 'is-active')}>
                 <button
@@ -190,7 +219,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           <span>
             {connection.user}@{connection.host}
           </span>
-          <span className="terminal-port">:22</span>
+          {connection.type === 'SSH' && <span className="terminal-port">:{connection.port}</span>}
           <Badge>{connection.type === 'Local' ? 'ZSH' : 'SSH'}</Badge>
         </div>
         <span className="terminal-ready">
@@ -198,8 +227,10 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           {sessionStatus[session.status].label}
         </span>
       </div>
-      {bottomTab === 'terminal' ? <TerminalContent connection={connection} session={session} /> : <div className="terminal-files empty-state"><FolderOpen size={22} /><h3>文件浏览不可用</h3><p>当前后台协议未提供目录浏览接口。</p></div>}
+      <div hidden={bottomTab !== 'terminal'}><TerminalContent session={session} /></div>
+      {bottomTab === 'files' && <div className="terminal-files empty-state"><FolderOpen size={22} /><h3>文件浏览不可用</h3><p>当前后台协议未提供目录浏览接口。</p></div>}
       <div className={cn('terminal-input-notice', manual && 'is-manual')}>
+        {session.status === 'ended' ? <div><History size={14} /><span>会话已结束 · {session.result} · 终端输出已保留</span></div> : <>
         <div>
           {manual ? <Keyboard size={14} /> : <Radio size={14} />}
           <span>
@@ -210,6 +241,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           {manual ? '交还 AI' : '手动接管'}
           <ArrowRight size={12} />
         </button>
+        </>}
       </div>
       <div className="terminal-bottom">
         <div className="terminal-bottom-tabs">
@@ -229,12 +261,11 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           </button>
         </div>
         <span>
-          bash <span className="status-separator">/</span> UTF-8{' '}
-          <span className="status-separator">/</span> 120 × 36
+          {connection.type === 'Local' ? '本地终端' : 'SSH'} <span className="status-separator">/</span> UTF-8
         </span>
         <span className="terminal-latency">
           <span className="status-dot" />
-          34 ms
+          {sessionStatus[session.status].label}
         </span>
       </div>
     </section>
@@ -396,7 +427,7 @@ export default function Workspace() {
   const otherSession = sessions.find(
     (item) => item.id !== selectedSession.id && item.status !== 'ended',
   )
-  if (!tabs.length)
+  if (!tabs.length || !selectedSession.id)
     return (
       <div className="workspace-page">
         <PageHeading title="终端工作区" description="在这里打开会话，继续你的工作。">
