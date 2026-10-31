@@ -231,16 +231,6 @@ export default function App() {
     >
       <TooltipProvider delayDuration={350}>
         <div className={cn('desktop-shell', !sidebar && 'sidebar-hidden')}>
-          <header className="native-titlebar">
-            <div className="native-window-controls" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="native-preview">
-              {loading ? '准备工作区' : backendError ? '连接中断' : 'DESKTOP CONNECTED'} <span />
-            </div>
-          </header>
           <div className="desktop-body">
             <aside className="app-sidebar" aria-label="工作区导航">
               <Menu

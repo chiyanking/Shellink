@@ -27,7 +27,6 @@
   --surface-raised: #ffffff;
   --surface-hover: #f0f2f6;
   --sidebar: #f1f2f5;
-  --titlebar: #eaecef;
   --muted: #edf0f4;
   --muted-foreground: #737985;
   --subtle-foreground: #737985;
@@ -65,7 +64,6 @@
   --surface-raised: #25262c;
   --surface-hover: #292a30;
   --sidebar: #161719;
-  --titlebar: #141416;
   --muted: #27282e;
   --muted-foreground: #91939f;
   --subtle-foreground: #747784;
@@ -507,62 +505,14 @@ select {
   font-size: 11px;
 }
 
-/* Native window and application shell */
+/* Application shell */
 .desktop-shell {
   height: 100vh;
   height: 100dvh;
   display: grid;
-  grid-template-rows: 36px minmax(0, 1fr) 25px;
+  grid-template-rows: minmax(0, 1fr) 25px;
   background: var(--background);
   overflow: hidden;
-}
-.native-titlebar {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--sidebar-width);
-  align-items: center;
-  background: var(--titlebar);
-  border-bottom: 1px solid var(--border);
-}
-.native-window-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-left: 17px;
-}
-.tauri-runtime .native-window-controls {
-  visibility: hidden;
-}
-.native-window-controls span {
-  display: block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ed6a5e;
-  box-shadow: inset 0 0 0 1px #00000014;
-}
-.native-window-controls span:nth-child(2) {
-  background: #f4bf50;
-}
-.native-window-controls span:nth-child(3) {
-  background: #61c554;
-}
-.native-preview {
-  grid-column: 3;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-right: 17px;
-  color: var(--subtle-foreground);
-  font: 9px var(--font-mono);
-  letter-spacing: 1px;
-}
-.native-preview > span {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border: 1px solid var(--muted-foreground);
-  border-radius: 50%;
 }
 .desktop-body {
   display: grid;
@@ -3050,15 +3000,6 @@ select {
   :root {
     --sidebar-width: 185px;
   }
-  .native-titlebar {
-    grid-template-columns: 100px minmax(0, 1fr) 100px;
-  }
-  .native-preview {
-    font-size: 0;
-  }
-  .native-preview > span {
-    width: 5px;
-  }
   .main-scroll {
     padding: 22px 18px;
   }
@@ -3160,9 +3101,6 @@ select {
   }
 }
 @media (max-width: 580px) {
-  .desktop-shell {
-    grid-template-rows: 32px minmax(0, 1fr) 25px;
-  }
   .desktop-body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3173,22 +3111,11 @@ select {
     display: flex;
     position: absolute;
     z-index: 40;
-    top: 32px;
+    top: 0;
     bottom: 25px;
     left: 0;
     width: 225px;
     box-shadow: 20px 0 80px var(--overlay);
-  }
-  .native-titlebar {
-    grid-template-columns: 80px minmax(0, 1fr) 70px;
-  }
-  .native-window-controls {
-    gap: 6px;
-    padding-left: 13px;
-  }
-  .native-window-controls span {
-    width: 8px;
-    height: 8px;
   }
   .main-topbar {
     min-height: 48px;
