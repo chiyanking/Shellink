@@ -951,11 +951,12 @@ select {
 .session-tabs {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-height: 40px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   padding-right: 6px;
+  overflow: hidden;
 }
 .session-tab {
   display: flex;
@@ -1026,9 +1027,11 @@ select {
 }
 .session-add {
   margin-left: 6px;
+  flex-shrink: 0;
 }
 .session-tabs-end {
   margin-left: auto;
+  flex-shrink: 0;
 }
 .terminal-address {
   display: flex;
