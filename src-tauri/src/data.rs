@@ -281,6 +281,39 @@ impl DataStore {
         }
         Ok(json!({"items":items,"cursor":cursor,"hasMore":items.len() as i64==limit}))
     }
+    /// 最近 limit 个块（尾部优先），items 仍按 seq 升序返回。
+    /// hasMore=true 表示历史里还有更早的块未被包含。
+    pub fn history_chunks_recent(&self, id: &str, limit: i64) -> Result<Value, String> {
+        let c = self.conn.lock().unwrap();
+        let exists: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            return Err("Session not found".into());
+        }
+        let limit = limit.clamp(1, 10_000);
+        let mut s=c.prepare("SELECT id,session_id,seq,direction,data_plain,created_at FROM history_chunks WHERE session_id=? AND internal=0 ORDER BY seq DESC LIMIT ?").map_err(|e|e.to_string())?;
+        let rows=s.query_map(rusqlite::params![id,limit],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"sessionId":r.get::<_,String>(1)?,"seq":r.get::<_,i64>(2)?,"direction":r.get::<_,String>(3)?,"plain":r.get::<_,String>(4)?,"createdAt":r.get::<_,i64>(5)?}))).map_err(|e|e.to_string())?;
+        let mut items = Vec::new();
+        for row in rows {
+            items.push(row.map_err(|e| e.to_string())?);
+        }
+        items.reverse();
+        let first_seq = items.first().and_then(|v| v.get("seq")).and_then(Value::as_i64);
+        let has_more = first_seq.is_some_and(|seq| {
+            c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM history_chunks WHERE session_id=? AND seq<? AND internal=0)",
+                rusqlite::params![id, seq],
+                |r| r.get(0),
+            )
+            .unwrap_or(false)
+        });
+        Ok(json!({"items":items,"cursor":items.last().and_then(|v|v.get("seq")).cloned().unwrap_or(json!(0)),"hasMore":has_more}))
+    }
     pub fn update_session_mode(&self, id: &str, mode: &str) -> Result<Value, String> {
         if mode != "AUTO" && mode != "MANUAL" {
             return Err("mode must be AUTO or MANUAL".into());
@@ -833,6 +866,30 @@ mod tests {
         ));
         fs::create_dir(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn history_chunks_recent_returns_latest_blocks_in_ascending_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
+        db.insert_session("test", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
+        for i in 1..=10 {
+            db.add_output("test", &format!("chunk-{i} ")).unwrap();
+        }
+        // 最近 3 块: seq 8,9,10 — 返回仍按 seq 升序
+        let recent = db.history_chunks_recent("test", 3).unwrap();
+        let seqs: Vec<i64> = recent["items"].as_array().unwrap()
+            .iter().map(|i| i["seq"].as_i64().unwrap()).collect();
+        assert_eq!(seqs, vec![8, 9, 10]);
+        let text: String = recent["items"].as_array().unwrap()
+            .iter().filter_map(|i| i["plain"].as_str()).collect();
+        assert_eq!(text, "chunk-8 chunk-9 chunk-10 ");
+        assert_eq!(recent["hasMore"], json!(true));
+        // 最近 3 块但总共不足 3: 全部返回, hasMore=false
+        let all = db.history_chunks_recent("test", 20).unwrap();
+        assert_eq!(all["items"].as_array().unwrap().len(), 10);
+        assert_eq!(all["hasMore"], json!(false));
     }
 
     #[test]

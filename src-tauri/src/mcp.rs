@@ -43,8 +43,8 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "shellink_read_output",
-        "Read the terminal output (plain text) of a session.",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","description":"Max number of history chunks"}},"required":["id"]}"#,
+        "Read recent terminal output (plain text, ANSI stripped) of a session. Returns the LATEST chunks: default 400 chunks, max 10000, oldest-first within the result.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","description":"Max number of recent history chunks (default 400, max 10000)"}},"required":["id"]}"#,
     ),
     (
         "shellink_send_input",
@@ -622,9 +622,9 @@ fn call_tool(app: &AppHandle, params: &Value) -> Result<Value, (i64, String)> {
                     let limit = args
                         .get("limit")
                         .and_then(Value::as_i64)
-                        .unwrap_or(2000)
+                        .unwrap_or(400)
                         .clamp(1, 10_000);
-                    db.history_chunks(id, 0, limit).map(|history| {
+                    db.history_chunks_recent(id, limit).map(|history| {
                         let text = history
                             .get("items")
                             .and_then(Value::as_array)
@@ -635,6 +635,7 @@ fn call_tool(app: &AppHandle, params: &Value) -> Result<Value, (i64, String)> {
                             })
                             .filter_map(|item| item.get("plain").and_then(Value::as_str))
                             .collect::<String>();
+                        let text = strip_ansi(&text);
                         json!({"text":text})
                     })
                 })
@@ -690,6 +691,62 @@ fn required_string<'a>(params: &'a Value, field: &str) -> Result<&'a str, &'stat
 
 fn tool_error(message: &str) -> Value {
     json!({"isError":true,"content":[{"type":"text","text":message}]})
+}
+
+fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                // CSI: parameters+intermediates until final byte 0x40-0x7E
+                while let Some(&c) = chars.peek() {
+                    chars.next();
+                    if ('\u{40}'..='\u{7e}').contains(&c) {
+                        break;
+                    }
+                    if !('\u{20}'..='\u{3f}').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                // OSC: terminated by BEL or ST (ESC \)
+                while let Some(c) = chars.next() {
+                    if c == '\x07' {
+                        break;
+                    }
+                    if c == '\x1b' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            Some(c) if ('\u{20}'..='\u{2f}').contains(c) => {
+                // ESC with intermediates (e.g. charset selection ESC ( B):
+                // consume intermediates then the final byte
+                while let Some(&c) = chars.peek() {
+                    if !('\u{20}'..='\u{2f}').contains(&c) {
+                        break;
+                    }
+                    chars.next();
+                }
+                chars.next();
+            }
+            Some(_) => {
+                // Two-char escapes (keypad modes, index, etc.)
+                chars.next();
+            }
+            None => {}
+        }
+    }
+    out
 }
 
 fn respond_error(stream: &mut TcpStream, status: u16, message: &str) {
@@ -786,6 +843,32 @@ mod tests {
             parse_content_length(Some("4194305")),
             Err((413, "request body too large".into()))
         );
+    }
+
+    #[test]
+    fn read_output_schema_documents_default_limit() {
+        let schemas = tools();
+        let read = schemas
+            .iter()
+            .find(|tool| tool["name"] == "shellink_read_output")
+            .unwrap();
+        assert!(read["description"].as_str().unwrap().contains("default 400"));
+        assert!(read["inputSchema"]["properties"]["limit"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("default 400"));
+    }
+
+    #[test]
+    fn strips_ansi_escapes_from_output_text() {
+        let text = strip_ansi("\x1b]0;root@host:~\x07prompt> \x1b[1;32mok\x1b[0m\n");
+        assert_eq!(text, "prompt> ok\n");
+
+        let text = strip_ansi("\x1b[7;32m==>running...\x1b[0m\x1b[18;106H");
+        assert_eq!(text, "==>running...");
+
+        let text = strip_ansi("\x1b]0;GateShell\x1b\\x\x1b(B\x1b[?25l\x1b[?1049h");
+        assert_eq!(text, "x");
     }
 
     #[test]
