@@ -26,6 +26,10 @@ import { Badge, Button, Hint, Menu } from './components/ui'
 import { cn } from './lib/utils'
 import { createTerminalInput } from './terminal-input'
 
+const TERMINAL_SCROLLBAR_WIDTH = 6
+// xterm's DOM renderer rounds its 32-glyph width sample to whole pixels.
+const TERMINAL_CELL_ROUNDING = 0.5 / 32
+
 export function PageHeading({
   eyebrow,
   title,
@@ -51,11 +55,22 @@ export function PageHeading({
 
 function TerminalContent({ session }: { session: Session }) {
   const { coreEpoch, font, fontSize, notify, theme: colorScheme } = useDesign()
+  const fontDescriptor = `${fontSize}px "${font}"`
+  const [readyFont, setReadyFont] = useState('')
   const control = useRef({ manual: false, active: false })
   control.current = { manual: session.mode === 'MANUAL', active: session.status !== 'ended' }
   const host = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!host.current || !session.id) return
+    let alive = true
+    // Font swapping after open leaves xterm's cached glyph widths out of date.
+    void Promise.all([
+      document.fonts.load(fontDescriptor),
+      document.fonts.load(`bold ${fontDescriptor}`),
+    ]).catch(() => {}).then(() => { if (alive) setReadyFont(fontDescriptor) })
+    return () => { alive = false }
+  }, [fontDescriptor])
+  useEffect(() => {
+    if (!host.current || !session.id || readyFont !== fontDescriptor) return
     let alive = true
     const token = (name: string, fallback: string) =>
       getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
@@ -65,7 +80,7 @@ function TerminalContent({ session }: { session: Session }) {
       fontFamily: `"${font}", monospace`,
       fontSize: Number(fontSize),
       // xterm 6 uses this width for both its scrollbar and FitAddon's column budget.
-      overviewRuler: { width: 6 },
+      overviewRuler: { width: TERMINAL_SCROLLBAR_WIDTH },
       theme: {
         background: token('--terminal-canvas', '#121317'),
         foreground: token('--terminal-foreground', '#aeb4c1'),
@@ -85,7 +100,16 @@ function TerminalContent({ session }: { session: Session }) {
       if (!alive || !host.current?.clientWidth || !host.current.clientHeight) return
       const size = fit.proposeDimensions()
       if (!size) return
-      const cols = Math.max(20, Math.min(500, size.cols))
+      const screen = terminal.element?.querySelector<HTMLElement>('.xterm-screen')
+      const cellWidth = screen ? parseFloat(screen.style.width) / terminal.cols : 0
+      const availableWidth = host.current.clientWidth - TERMINAL_SCROLLBAR_WIDTH
+      // Let glyphs use the fractional-column remainder, with enough room for
+      // the DOM renderer's accumulated measurement rounding at the last column.
+      host.current.style.setProperty('--terminal-row-width', `${availableWidth}px`)
+      const fittedCols = cellWidth > 0
+        ? Math.min(size.cols, Math.floor(availableWidth / (cellWidth + TERMINAL_CELL_ROUNDING)))
+        : size.cols
+      const cols = Math.max(20, Math.min(500, fittedCols))
       const rows = Math.max(5, Math.min(200, size.rows))
       if (terminal.cols !== cols || terminal.rows !== rows) terminal.resize(cols, rows)
       if (control.current.active && (cols !== sentCols || rows !== sentRows)) {
@@ -123,7 +147,7 @@ function TerminalContent({ session }: { session: Session }) {
       buffered.sort((a, b) => a.seq - b.seq).forEach(item => { if (item.seq > replaySeq) { terminal.write(item.raw); replaySeq = item.seq } })
     })().catch(error => { if (alive) notify(String(error)) })
     return () => { alive = false; dispose?.(); resizeObserver.disconnect(); cancelAnimationFrame(resizeFrame); input.dispose(); terminal.dispose() }
-  }, [session.id, font, fontSize, coreEpoch, notify, colorScheme])
+  }, [session.id, font, fontSize, fontDescriptor, readyFont, coreEpoch, notify, colorScheme])
   return <div className="terminal-output xterm-host" aria-label={`${session.name} 终端`}><div ref={host} className="terminal-viewport" /></div>
 }
 

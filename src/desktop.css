@@ -1345,6 +1345,10 @@ select {
 .terminal-viewport .xterm-viewport {
   background: var(--terminal-canvas);
 }
+/* Keep xterm's row clip at the scrollbar, including unused fractional columns. */
+.terminal-viewport .xterm-rows > div {
+  width: var(--terminal-row-width, 100%) !important;
+}
 .terminal-welcome {
   display: flex;
   gap: 10px;
