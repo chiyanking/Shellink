@@ -52,6 +52,11 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
         r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}},"required":["id","text"]}"#,
     ),
     (
+        "shellink_set_mode",
+        "Set a session's input mode to AUTO (MCP/AI input allowed) or MANUAL (human typing only).",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"mode":{"type":"string","enum":["AUTO","MANUAL"]}},"required":["id","mode"]}"#,
+    ),
+    (
         "shellink_close_session",
         "Close/terminate a session.",
         r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
@@ -644,6 +649,15 @@ fn call_tool(app: &AppHandle, params: &Value) -> Result<Value, (i64, String)> {
                             .input(&db, id, text, true, false)
                     })
             }
+            "shellink_set_mode" => {
+                let id = required_string(args, "id").map_err(str::to_owned);
+                let mode = required_string(args, "mode").map_err(str::to_owned);
+                id.and_then(|id| mode.and_then(|mode| {
+                    app.try_state::<Arc<SessionManager>>()
+                        .ok_or_else(|| "session manager unavailable".to_string())?
+                        .set_mode(&db, id, mode)
+                }))
+            }
             "shellink_close_session" => required_string(args, "id")
                 .map_err(str::to_owned)
                 .and_then(|id| {
@@ -725,7 +739,7 @@ mod tests {
     #[test]
     fn schemas_include_required_tool_arguments() {
         let schemas = tools();
-        assert_eq!(schemas.len(), 8);
+        assert_eq!(schemas.len(), 9);
         let create = schemas
             .iter()
             .find(|tool| tool["name"] == "shellink_create_session")

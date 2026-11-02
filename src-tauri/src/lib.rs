@@ -9,6 +9,9 @@ use tauri::{Manager, webview::PageLoadEvent};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let data_store = data::DataStore::open().expect("无法打开 Rust 数据库");
+    data_store
+        .reconcile_stale_sessions()
+        .expect("无法清理上次运行遗留的会话");
     tauri::Builder::default()
         .manage(Arc::new(bridge::Backend::default()))
         .manage(data_store)

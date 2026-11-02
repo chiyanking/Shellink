@@ -158,6 +158,17 @@ impl DataStore {
         .map_err(|e| e.to_string())
         .map(|_| ())
     }
+    /// 启动时调用: 此时本进程的 live 会话列表为空, 数据库里所有非 DISCONNECTED
+    /// 的会话都是上次运行遗留的 (App 被强杀/崩溃时 shutdown 未执行)。
+    pub fn reconcile_stale_sessions(&self) -> Result<(), String> {
+        let c = self.conn.lock().unwrap();
+        c.execute(
+            "UPDATE sessions SET state='DISCONNECTED', closed_at=COALESCE(closed_at,?), close_reason='App exited without cleanup' WHERE state!='DISCONNECTED'",
+            [now()],
+        )
+        .map_err(|e| e.to_string())
+        .map(|_| ())
+    }
     pub fn session_state(&self, id: &str) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
         c.query_row("SELECT id,state,mode,closed_at,close_reason,exit_code,(SELECT COALESCE(MAX(seq),0) FROM history_chunks WHERE session_id=sessions.id),(SELECT COALESCE(group_concat(data_plain,''),'') FROM (SELECT data_plain FROM history_chunks WHERE session_id=sessions.id AND direction='output' ORDER BY seq DESC LIMIT 15)) FROM sessions WHERE id=?", [id], |r| {
@@ -837,6 +848,29 @@ mod tests {
         db.update_session_state("test", "DISCONNECTED", Some("Process exited")).unwrap();
         db.add_output("test", "final output").unwrap();
         assert_eq!(db.session_state("test").unwrap()["active"], false);
+    }
+
+    #[test]
+    fn reconcile_marks_orphaned_active_sessions_as_disconnected() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
+        // 上次运行遗留的"活跃"会话 (进程被强杀时 shutdown 未执行)
+        db.insert_session("stale-1", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
+        db.insert_session("stale-2", "profile", "Profile", "local", 120, 36, "", "test", "AUTO").unwrap();
+        db.update_session_state("stale-2", "OUTPUTTING", None).unwrap();
+        db.reconcile_stale_sessions().unwrap();
+        assert_eq!(db.session_state("stale-1").unwrap()["active"], false);
+        assert_eq!(db.session_state("stale-2").unwrap()["active"], false);
+        assert_eq!(db.session_state("stale-1").unwrap()["closeReason"], "App exited without cleanup");
+        // 本次运行的真实会话 (reconcile 之后创建), 不应被影响
+        db.insert_session("live-1", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
+        assert_eq!(db.session_state("live-1").unwrap()["active"], true);
+        // 幂等: 重复调用不覆盖已有 closed_at / close_reason
+        db.reconcile_stale_sessions().unwrap();
+        let again = db.session_state("stale-1").unwrap();
+        assert_eq!(again["active"], false);
+        assert_eq!(again["closeReason"], "App exited without cleanup");
     }
 
     #[test]
