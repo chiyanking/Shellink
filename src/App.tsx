@@ -34,6 +34,7 @@ import { cn } from './lib/utils'
 import Workspace from './Workspace'
 import { ConnectionsPage, HistoryPage, IntegrationsPage, SettingsPage } from './Pages'
 import SessionsPage from './Sessions'
+import SshAuth from './SshAuth'
 
 const navigation = [
   { id: 'workspace', label: '工作台', icon: LayoutGrid, shortcut: '1' },
@@ -491,6 +492,7 @@ export default function App() {
             </div>
           </footer>
         </div>
+        <SshAuth enabled={coreReady} sessions={sessions} onChange={refresh} />
         <Dialog
           open={modal === 'connection'}
           onOpenChange={(open) => !open && setModal(null)}
@@ -502,7 +504,7 @@ export default function App() {
             onSubmit={async (event) => {
               event.preventDefault(); const fields = new FormData(event.currentTarget); setSaving(true)
               const body: Record<string, unknown> = { name: String(fields.get('name')), connectType: connectionType === 'SSH' ? 'ssh' : 'command' }
-              if (connectionType === 'SSH') { Object.assign(body, { host: String(fields.get('host')), port: Number(fields.get('port') || 22), username: String(fields.get('username')), authType }); const secret = String(fields.get('secret') || ''); if (secret) body[authType === 'key' ? 'privateKey' : 'password'] = secret; const passphrase = String(fields.get('passphrase') || ''); if (passphrase) body.passphrase = passphrase }
+              if (connectionType === 'SSH') { Object.assign(body, { host: String(fields.get('host')), port: Number(fields.get('port') || 22), username: String(fields.get('username')), authType }); const secret = String(fields.get('secret') || ''); if (secret && authType !== 'keyboard-interactive') body[authType === 'key' ? 'privateKey' : 'password'] = secret; const passphrase = String(fields.get('passphrase') || ''); if (passphrase && authType === 'key') body.passphrase = passphrase }
               else body.command = String(fields.get('command'))
               try { const result = await rpc<Profile>(editingId ? 'profiles.update' : 'profiles.create', editingId ? { id: editingId, profile: body } : body); savePreference(`group.${result.id}`, connectionType === 'Local' ? 'Local' : connectionGroup); await refresh(); setModal(null); notify('连接配置已保存') } catch (error) { notify(errorText(error)) } finally { setSaving(false) }
             }}
@@ -555,6 +557,8 @@ export default function App() {
                       options={[
                         { value: 'key', label: 'SSH 密钥' },
                         { value: 'password', label: '密码' },
+                        { value: 'password-mfa', label: '密码 + MFA / 2FA' },
+                        { value: 'keyboard-interactive', label: '交互认证（MFA / 2FA）' },
                       ]}
                     />
                   </label>
@@ -571,11 +575,15 @@ export default function App() {
                     />
                   </label>
                 </div>
-                <label className="form-field">
+                {authType !== 'keyboard-interactive' && <label className="form-field">
                   {authType === 'key' ? '私钥内容（留空保留原密钥）' : '密码（留空保留原密码）'}
                   {authType === 'key' ? <textarea name="secret" rows={4} className="ui-input" placeholder="粘贴 PEM / OpenSSH 私钥内容" /> : <Input name="secret" autoComplete="new-password" placeholder="输入密码" type="password" />}
                   {authType === 'key' && <Input name="passphrase" autoComplete="new-password" type="password" placeholder="私钥口令（可选）" />}
-                </label>
+                </label>}
+                <div className="form-info ssh-auth-profile-info">
+                  <ShieldCheck size={14} />
+                  <span>{authType === 'password-mfa' ? '先使用密码登录；密码通过后，按服务器提示输入短信或动态验证码完成第二步验证。' : authType === 'keyboard-interactive' ? '连接时按服务器提示输入密码、动态验证码或其他认证响应。' : '支持追加 MFA / 2FA。服务器要求验证码或其他认证响应时会弹出认证窗口。'}验证码仅用于当次认证，不会保存。</span>
+                </div>
               </>
             ) : (
               <label className="form-field">

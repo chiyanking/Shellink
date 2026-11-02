@@ -72,14 +72,18 @@ impl Backend {
             .get("data")
             .and_then(|data| data.get("sessionId"))
             .and_then(Value::as_str);
-        self.subscriptions.lock().unwrap().values().any(|subscription| {
-            let replay = subscription.replay;
-            let session_matches = subscription
-                .session_id
-                .as_deref()
-                .is_none_or(|wanted| Some(wanted) == session_id);
-            session_matches && (replay || event.get("event").is_some())
-        })
+        self.subscriptions
+            .lock()
+            .unwrap()
+            .values()
+            .any(|subscription| {
+                let replay = subscription.replay;
+                let session_matches = subscription
+                    .session_id
+                    .as_deref()
+                    .is_none_or(|wanted| Some(wanted) == session_id);
+                session_matches && (replay || event.get("event").is_some())
+            })
     }
 
     pub fn shutdown(&self, _app: &AppHandle) {
@@ -180,7 +184,7 @@ fn dispatch(app: &AppHandle, backend: &Backend, method: &str, params: &Value) ->
             "serviceVersion": env!("CARGO_PKG_VERSION"),
             "serviceCommit": "unknown",
             "protocolVersion": 1,
-            "capabilities": ["system.hello", "system.ping", "system.status", "system.stop", "profiles.list", "profiles.get", "profiles.create", "profiles.update", "profiles.delete", "sessions.list", "sessions.create", "sessions.state", "sessions.history", "sessions.input", "sessions.mode", "sessions.resize", "sessions.close", "sessions.removeRecord", "sessions.rename", "sessions.replay", "sessions.historyChunks", "webhooks.list", "webhooks.create", "webhooks.delete", "webhooks.messages", "webhooks.clearMessages", "events.subscribe", "events.unsubscribe", "mcp.info", "mcp.config"]
+            "capabilities": ["system.hello", "system.ping", "system.status", "system.stop", "profiles.list", "profiles.get", "profiles.create", "profiles.update", "profiles.delete", "sessions.list", "sessions.create", "sessions.state", "sessions.authPending", "sessions.authRespond", "sessions.history", "sessions.input", "sessions.mode", "sessions.resize", "sessions.close", "sessions.removeRecord", "sessions.rename", "sessions.replay", "sessions.historyChunks", "webhooks.list", "webhooks.create", "webhooks.delete", "webhooks.messages", "webhooks.clearMessages", "events.subscribe", "events.unsubscribe", "mcp.info", "mcp.config"]
         })),
         "system.ping" => Ok(json!({"pong": true, "at": now()})),
         "system.status" => system_status(app, &db, &manager, &server, backend),
@@ -200,6 +204,19 @@ fn dispatch(app: &AppHandle, backend: &Backend, method: &str, params: &Value) ->
         ),
         "profiles.delete" => db.profile_delete(required_string(params, "id")?),
         "sessions.list" => manager.list(&db),
+        "sessions.authPending" => manager.auth_pending(&db),
+        "sessions.authRespond" => manager.auth_respond(
+            &db,
+            required_string(params, "id")?,
+            params
+                .get("promptId")
+                .and_then(Value::as_u64)
+                .ok_or("promptId must be an unsigned integer")?,
+            params
+                .get("response")
+                .and_then(Value::as_str)
+                .ok_or("response must be a string")?,
+        ),
         "sessions.create" => {
             let mode = params.get("mode").and_then(Value::as_str).unwrap_or("AUTO");
             let source = params

@@ -2,6 +2,8 @@ mod bridge;
 mod data;
 mod mcp;
 mod sessions;
+mod ssh_auth;
+pub use ssh_auth::run_askpass;
 use std::sync::Arc;
 use tauri::{Manager, webview::PageLoadEvent};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

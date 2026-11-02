@@ -1,6 +1,6 @@
 # Shellink Desktop 架构
 
-更新日期：2026-10-31
+更新日期：2026-11-01
 
 Shellink 是一个由 Tauri、React 和 Rust 组成的本地终端工作台。桌面进程是唯一的运行宿主：窗口、Rust 核心、SQLite、终端子进程、MCP HTTP 和 Webhook 接收端共享同一个生命周期。关闭主窗口时，HTTP 监听器和全部终端会话都会停止，不留下后台服务。
 
@@ -64,7 +64,7 @@ React 通过 `src/backend.ts` 调用 Tauri 的 `core_request`。核心方法包�
 | Webhook | `webhooks.list`、`webhooks.create`、`webhooks.delete`、`webhooks.messages`、`webhooks.clearMessages` |
 | 事件 | `events.subscribe`、`events.unsubscribe` |
 
-会话支持 `AUTO` 和 `MANUAL` 两种模式。Desktop 新建会话默认使用 `MANUAL`，用户接管时可直接输入；MCP 创建会话默认使用 `AUTO`。每条输入和输出写入对应 session 的历史，实时输出通过 `shellink:event` 发送，事件订阅可按 `sessionId` 过滤。
+会话支持 `AUTO` 和 `MANUAL` 两种模式。Desktop 新建会话默认使用 `MANUAL`，用户接管时可直接输入；MCP 创建会话默认使用 `AUTO`。终端输入和输出写入对应 session 的历史，实时输出通过 `shellink:event` 发送，事件订阅可按 `sessionId` 过滤。SSH 认证响应走独立通道，不写入终端历史。
 
 ## 5. MCP 与 Webhook
 
@@ -76,7 +76,9 @@ Webhook 回调地址为 `/shellink/webhook/callback`，接收 JSON 后向 Deskto
 
 ## 6. 会话执行
 
-command profile 使用平台 shell 启动本地命令。SSH profile 使用系统 OpenSSH，启用伪终端，并根据加密配置自动回答 password 或 key passphrase 提示。private key 写入 session 期间的数据目录临时文件，session 结束或 Desktop 退出时删除。
+command profile 使用平台 shell 启动本地命令。SSH profile 使用系统 OpenSSH，启用伪终端和 keyboard-interactive 认证，通过 `SSH_ASKPASS_REQUIRE=force` 将认证提示交给 Shellink 可执行文件的 askpass 入口（在 Tauri 初始化之前运行）。每个 SSH session 建立随机端口、随机令牌保护的 loopback 通道，保存的 password 或 key passphrase 仅自动回答匹配提示一次；其他提示交给 Desktop 的 MFA/2FA 对话框。`keyboard-interactive` 配置不自动使用保存的凭据。private key 写入 session 期间的数据目录临时文件，session 结束或 Desktop 退出时删除。
+
+`password-mfa` 配置先使用保存的密码，密码通过后由服务器要求短信或动态验证码，再弹出第二步验证窗口。`sessions.authPending` 返回内存中的待处理提示，`sessions.authRespond` 按 session 和 prompt ID 提交单次响应；`session.auth` 事件通知界面刷新，轮询保证漏掉事件或切换页面后仍可恢复提示。认证对话框不依赖 AUTO/MANUAL 模式；等待认证时拒绝常规终端输入，响应不写入 SQLite、事件或终端。多轮提示逐次处理，每轮等待上限为 5 分钟；关闭认证窗口会终止对应 session 并释放通道。
 
 输出读取线程将原始数据写入历史并发布带有 `sessionId`、seq 和 raw 内容的事件。后台会回收已退出的子进程、写入退出码和关闭原因；`sessions.replay` 返回可用于终端重放的历史内容。
 

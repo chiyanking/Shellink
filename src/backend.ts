@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
-export type Profile = { id: string; name: string; connectType: 'ssh' | 'command'; host: string; port: number; username: string; authType: 'password' | 'key'; command: string | null; hasPassword: boolean; hasPrivateKey: boolean; term: string; cols: number; rows: number }
+export type Profile = { id: string; name: string; connectType: 'ssh' | 'command'; host: string; port: number; username: string; authType: 'password' | 'password-mfa' | 'key' | 'keyboard-interactive'; command: string | null; hasPassword: boolean; hasPrivateKey: boolean; term: string; cols: number; rows: number }
 export type SessionRecord = { id: string; profileId: string; profileName: string; name: string; source: string; target: string; state: string; mode: 'AUTO' | 'MANUAL'; createdAt: number; closedAt?: number; closeReason?: string; active: boolean }
 export type RuntimeInfo = { status: { version: string; pid: number; httpEnabled: boolean; httpUrl: string | null; activeSessions: number }; dataHome: string; logPath: string; command: string; defaultShell: string; platform: string }
 export type MCPInfo = { enabled: boolean; running: boolean; httpEnabled: boolean; url: string; token: string; command: string; clientConfig: object; clientConfigStdio: object }

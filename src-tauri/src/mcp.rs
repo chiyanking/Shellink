@@ -24,7 +24,7 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     (
         "shellink_create_profile",
         "Create a Shellink connection profile. SSH profiles use host, port, username and authentication fields.",
-        r#"{"type":"object","properties":{"name":{"type":"string","description":"Profile display name"},"connectType":{"type":"string","enum":["ssh","command"]},"host":{"type":"string"},"port":{"type":"integer"},"username":{"type":"string"},"authType":{"type":"string","enum":["password","key"]},"password":{"type":"string","description":"Plaintext password (encrypted by Shellink)"},"privateKey":{"type":"string","description":"Private key (encrypted by Shellink)"},"passphrase":{"type":"string"},"command":{"type":"string","description":"Command for connectType=command"},"term":{"type":"string"}},"required":["name","connectType"]}"#,
+        r#"{"type":"object","properties":{"name":{"type":"string","description":"Profile display name"},"connectType":{"type":"string","enum":["ssh","command"]},"host":{"type":"string"},"port":{"type":"integer"},"username":{"type":"string"},"authType":{"type":"string","enum":["password","password-mfa","key","keyboard-interactive"]},"password":{"type":"string","description":"Plaintext password (encrypted by Shellink)"},"privateKey":{"type":"string","description":"Private key (encrypted by Shellink)"},"passphrase":{"type":"string"},"command":{"type":"string","description":"Command for connectType=command"},"term":{"type":"string"}},"required":["name","connectType"]}"#,
     ),
     (
         "shellink_list_sessions",

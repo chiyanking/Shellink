@@ -7,6 +7,7 @@ The Rust core is part of the Desktop process. Closing the main window stops ever
 ## Features
 
 - Local command and OpenSSH connection profiles.
+- SSH MFA/2FA with interactive password, verification-code, and challenge-response dialogs.
 - Interactive terminal sessions with AUTO and MANUAL input modes.
 - Session history, replay, rename, close, and persistent exit status.
 - Encrypted profile secrets using a local `master.key`.
@@ -14,7 +15,9 @@ The Rust core is part of the Desktop process. Closing the main window stops ever
 - Incoming Webhook capture at `/shellink/webhook/callback`.
 - Native Desktop data-directory and lifecycle controls.
 
-Local and SSH sessions run in a native pseudo-terminal (PTY), supporting interactive password prompts, terminal controls, and window resizing. SSH sessions use the platform OpenSSH client. Password and key passphrase prompts are answered from the encrypted profile fields when the remote client asks for them. SSH private keys are written to a temporary private file for the lifetime of the session and removed when it ends.
+Local and SSH sessions run in a native pseudo-terminal (PTY), supporting terminal controls and window resizing. SSH sessions use the platform OpenSSH client. Password and key passphrase prompts are answered once from the encrypted profile fields when the client asks for them. Additional authentication challenges appear in a dedicated dialog, including verification codes, recovery codes, and Duo-style option prompts. Responses pass directly to OpenSSH through a per-session askpass channel and are never saved to profiles or terminal input history. SSH private keys are written to a temporary private file for the lifetime of the session and removed when it ends.
+
+For password-then-code SSH servers, select **密码 + MFA / 2FA**, enter the login password in the profile, and enter the SMS or authenticator code in the second-step dialog when the server requests it. Select **交互认证（MFA / 2FA）** to enter every response when connecting. Existing **密码** and **SSH 密钥** profiles also support additional factors automatically. Follow each server prompt; for push authentication, choose the requested option and approve on your device. Prompts work in both AUTO and MANUAL sessions, expire after five minutes, and can be cancelled by closing the authentication dialog (which closes that connection). This supports factors exposed by the server through SSH keyboard-interactive authentication.
 
 ## Requirements
 
