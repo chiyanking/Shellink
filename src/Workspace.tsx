@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import {
   ArrowRight,
@@ -27,8 +28,6 @@ import { cn } from './lib/utils'
 import { createTerminalInput } from './terminal-input'
 
 const TERMINAL_SCROLLBAR_WIDTH = 6
-// xterm's DOM renderer rounds its 32-glyph width sample to whole pixels.
-const TERMINAL_CELL_ROUNDING = 0.5 / 32
 
 export function PageHeading({
   eyebrow,
@@ -100,22 +99,26 @@ function TerminalContent({ session }: { session: Session }) {
       if (!alive || !host.current?.clientWidth || !host.current.clientHeight) return
       const size = fit.proposeDimensions()
       if (!size) return
-      const screen = terminal.element?.querySelector<HTMLElement>('.xterm-screen')
-      const cellWidth = screen ? parseFloat(screen.style.width) / terminal.cols : 0
-      const availableWidth = host.current.clientWidth - TERMINAL_SCROLLBAR_WIDTH
-      // Let glyphs use the fractional-column remainder, with enough room for
-      // the DOM renderer's accumulated measurement rounding at the last column.
-      host.current.style.setProperty('--terminal-row-width', `${availableWidth}px`)
-      const fittedCols = cellWidth > 0
-        ? Math.min(size.cols, Math.floor(availableWidth / (cellWidth + TERMINAL_CELL_ROUNDING)))
-        : size.cols
-      const cols = Math.max(20, Math.min(500, fittedCols))
+      const cols = Math.max(20, Math.min(500, size.cols))
       const rows = Math.max(5, Math.min(200, size.rows))
       if (terminal.cols !== cols || terminal.rows !== rows) terminal.resize(cols, rows)
       if (control.current.active && (cols !== sentCols || rows !== sentRows)) {
         sentCols = cols; sentRows = rows
         void rpc('sessions.resize', { id: session.id, cols, rows }).catch(() => {})
       }
+    }
+    let webgl: WebglAddon | undefined
+    try {
+      webgl = new WebglAddon()
+      webgl.onContextLoss(() => {
+        // Disposing the addon restores xterm's default renderer.
+        webgl?.dispose()
+        resizeTerminal()
+      })
+      terminal.loadAddon(webgl)
+    } catch {
+      // Keep the terminal usable when WebGL2 is unavailable.
+      webgl?.dispose()
     }
     const resizeObserver = new ResizeObserver(() => {
       cancelAnimationFrame(resizeFrame)
