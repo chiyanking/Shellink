@@ -49,7 +49,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## MCP
 
-The Desktop starts MCP HTTP on `127.0.0.1:7070` by default. Set `SHELLINK_HOST`, `SHELLINK_PORT`, or `SHELLINK_HTTP_ENABLED=false` before starting the Desktop to change the listener. The persisted enablement and bearer token are stored in `mcp.json` below the Shellink data directory.
+The Desktop starts MCP HTTP on `127.0.0.1:7070` by default. Set `SHELLINK_HOST`, `SHELLINK_PORT`, or `SHELLINK_HTTP_ENABLED=false` before starting the Desktop to change the listener. The persisted enablement and bearer token are stored in the SQLite database (`settings` table). Older versions kept them in `mcp.json` below the data directory; that file is imported automatically on startup and then removed.
 
 The MCP settings page shows both client configurations. HTTP clients use the URL and bearer token. Stdio clients run the packaged executable with the `mcp` argument; that process forwards JSON-RPC to the running Desktop, so it shares the same sessions and stops working when the Desktop exits.
 
@@ -57,7 +57,7 @@ The current MCP tools cover profiles, session creation/state/output/input, and s
 
 ## Data and security
 
-The default data directory is `$HOME/.Shellink` on macOS/Linux and `%APPDATA%\\Shellink` on Windows. Set `SHELLINK_HOME` to use another directory. `master.key`, `mcp.json`, and the SQLite database are created with private permissions where supported.
+The default data directory is `$HOME/.Shellink` on macOS/Linux and `%APPDATA%\\Shellink` on Windows. Set `SHELLINK_HOME` to use another directory. `master.key` and the SQLite database are created with private permissions where supported.
 
 Command profiles execute their configured command with the Desktop user's permissions. Only use trusted commands and scripts. Keep the MCP listener on loopback unless a network listener is explicitly required, and rotate the MCP token after exposing it to another machine.
 

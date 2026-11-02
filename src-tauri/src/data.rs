@@ -7,7 +7,6 @@ use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -202,7 +201,7 @@ impl DataStore {
             .optional()
             .map_err(|e| e.to_string())?
         };
-        let mut state = match raw {
+        let state = match raw {
             Some(raw) => serde_json::from_str::<Value>(&raw)
                 .map_err(|error| format!("解析 MCP 配置失败: {error}"))?,
             None => json!({"enabled": true, "token": ""}),
@@ -1021,7 +1020,6 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
 
-    #[test]
     #[test]
     fn mcp_state_persists_in_settings_table_and_migrates_mcp_json() {
         let conn = Connection::open_in_memory().unwrap();

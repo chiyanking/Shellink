@@ -48,8 +48,9 @@ SQLite 当前保存：
 - `sessions`：配置快照、目标、名称、来源、模式、尺寸、状态、关闭原因和退出码。
 - `history_chunks`：按 session 和 seq 保存输入、输出及纯文本内容。
 - `webhooks`：Webhook 对外订阅配置。
+- `settings`：键值配置，当前保存 MCP 开关与 bearer token（key=`mcp`，历史版本存于数据目录的 `mcp.json`，启动时自动迁移进表并删除旧文件）。
 
-Webhook 接收消息当前保存在 Desktop 进程内存中，最多保留 200 条；清空窗口或进程退出后消息不会恢复。MCP bearer token 保存在数据目录的 `mcp.json` 中，可从 Desktop 页面轮换。
+Webhook 接收消息当前保存在 Desktop 进程内存中，最多保留 200 条；清空窗口或进程退出后消息不会恢复。MCP bearer token 保存在 `settings` 表中，可从 Desktop 页面轮换。
 
 ## 4. Desktop RPC
 
