@@ -1,3 +1,4 @@
+use crate::ansi::strip_ansi;
 use crate::{data::DataStore, sessions::SessionManager};
 use serde_json::{Value, json};
 use std::{
@@ -59,6 +60,11 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     (
         "shellink_close_session",
         "Close/terminate a session.",
+        r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
+    ),
+    (
+        "shellink_screen",
+        "Get the currently visible screen of a session, rendered through a VT100 screen emulator (what the user sees right now). Use this for full-screen apps (vim, top, htop) and redraw-heavy output (progress bars, status lines) where shellink_read_output gives scrambled text; prefer shellink_read_output for ordinary streamed logs.",
         r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
     ),
 ];
@@ -666,6 +672,9 @@ fn call_tool(app: &AppHandle, params: &Value) -> Result<Value, (i64, String)> {
                         .ok_or_else(|| "session manager unavailable".to_string())?
                         .close(&db, id)
                 }),
+            "shellink_screen" => required_string(args, "id")
+                .map_err(str::to_owned)
+                .and_then(|id| db.screen(&id)),
             _ => return Ok(tool_error(&format!("unknown tool: {name}"))),
         };
     match result {
@@ -691,62 +700,6 @@ fn required_string<'a>(params: &'a Value, field: &str) -> Result<&'a str, &'stat
 
 fn tool_error(message: &str) -> Value {
     json!({"isError":true,"content":[{"type":"text","text":message}]})
-}
-
-fn strip_ansi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\x1b' {
-            out.push(c);
-            continue;
-        }
-        match chars.peek() {
-            Some('[') => {
-                chars.next();
-                // CSI: parameters+intermediates until final byte 0x40-0x7E
-                while let Some(&c) = chars.peek() {
-                    chars.next();
-                    if ('\u{40}'..='\u{7e}').contains(&c) {
-                        break;
-                    }
-                    if !('\u{20}'..='\u{3f}').contains(&c) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                chars.next();
-                // OSC: terminated by BEL or ST (ESC \)
-                while let Some(c) = chars.next() {
-                    if c == '\x07' {
-                        break;
-                    }
-                    if c == '\x1b' && chars.peek() == Some(&'\\') {
-                        chars.next();
-                        break;
-                    }
-                }
-            }
-            Some(c) if ('\u{20}'..='\u{2f}').contains(c) => {
-                // ESC with intermediates (e.g. charset selection ESC ( B):
-                // consume intermediates then the final byte
-                while let Some(&c) = chars.peek() {
-                    if !('\u{20}'..='\u{2f}').contains(&c) {
-                        break;
-                    }
-                    chars.next();
-                }
-                chars.next();
-            }
-            Some(_) => {
-                // Two-char escapes (keypad modes, index, etc.)
-                chars.next();
-            }
-            None => {}
-        }
-    }
-    out
 }
 
 fn respond_error(stream: &mut TcpStream, status: u16, message: &str) {
@@ -796,7 +749,7 @@ mod tests {
     #[test]
     fn schemas_include_required_tool_arguments() {
         let schemas = tools();
-        assert_eq!(schemas.len(), 9);
+        assert_eq!(schemas.len(), 10);
         let create = schemas
             .iter()
             .find(|tool| tool["name"] == "shellink_create_session")
@@ -870,7 +823,6 @@ mod tests {
         let text = strip_ansi("\x1b]0;GateShell\x1b\\x\x1b(B\x1b[?25l\x1b[?1049h");
         assert_eq!(text, "x");
     }
-
     #[test]
     fn handles_ping_and_json_rpc_errors() {
         let ping = process_request_with(

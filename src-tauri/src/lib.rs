@@ -1,6 +1,8 @@
+mod ansi;
 mod bridge;
 mod data;
 mod mcp;
+mod screen;
 mod sessions;
 mod ssh_auth;
 pub use ssh_auth::run_askpass;

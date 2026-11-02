@@ -55,6 +55,7 @@ impl DataStore {
         )
         .map_err(|e| e.to_string())?;
         initialize_schema(&conn)?;
+        migrate_legacy_mcp_json(&conn, &data_home)?;
         let key = load_master_key(&data_home, std::env::var("SHELLINK_MASTER_KEY").ok())?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -185,13 +186,46 @@ impl DataStore {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,text,0,now()]).map_err(|e|e.to_string())?;
+        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,crate::ansi::strip_ansi(text),0,now()]).map_err(|e|e.to_string())?;
         c.execute("UPDATE sessions SET state='OUTPUTTING' WHERE id=? AND state!='DISCONNECTED'", [id]).map_err(|e| e.to_string())?;
         Ok(seq)
     }
+    /// MCP 开关与 token，存于 settings 表（历史上在 mcp.json，启动时迁移）。
+    pub fn mcp_state(&self) -> Result<Value, String> {
+        let raw: Option<String> = {
+            let c = self.conn.lock().unwrap();
+            c.query_row(
+                "SELECT value FROM settings WHERE key='mcp'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+        };
+        let mut state = match raw {
+            Some(raw) => serde_json::from_str::<Value>(&raw)
+                .map_err(|error| format!("解析 MCP 配置失败: {error}"))?,
+            None => json!({"enabled": true, "token": ""}),
+        };
+        validate_mcp_state(&state)?;
+        Ok(state)
+    }
+
+    fn save_mcp_state(&self, state: &Value) -> Result<(), String> {
+        validate_mcp_state(state)?;
+        let raw = serde_json::to_string(state)
+            .map_err(|error| format!("序列化 MCP 配置失败: {error}"))?;
+        let c = self.conn.lock().unwrap();
+        c.execute(
+            "INSERT INTO settings (key,value) VALUES ('mcp',?1) ON CONFLICT(key) DO UPDATE SET value=?1",
+            rusqlite::params![raw],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub fn mcp_info(&self) -> Result<Value, String> {
-        let path = self.data_home.join("mcp.json");
-        let mut state = load_mcp_state(&path)?;
+        let mut state = self.mcp_state()?;
         if state
             .get("token")
             .and_then(Value::as_str)
@@ -199,7 +233,7 @@ impl DataStore {
             .is_empty()
         {
             state["token"] = Value::String(random_token());
-            save_mcp_state(&path, &state)?;
+            self.save_mcp_state(&state)?;
         }
         let enabled = state
             .get("enabled")
@@ -230,8 +264,7 @@ impl DataStore {
         }))
     }
     pub fn mcp_config(&self, params: &Value) -> Result<Value, String> {
-        let path = self.data_home.join("mcp.json");
-        let mut state = load_mcp_state(&path)?;
+        let mut state = self.mcp_state()?;
         if let Some(value) = params.get("enabled") {
             let enabled = value
                 .as_bool()
@@ -243,7 +276,7 @@ impl DataStore {
                 state["token"] = Value::String(random_token());
             }
         }
-        save_mcp_state(&path, &state)?;
+        self.save_mcp_state(&state)?;
         self.mcp_info()
     }
     pub fn add_input(&self, id: &str, text: &str) -> Result<(), String> {
@@ -255,7 +288,7 @@ impl DataStore {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"input",text,text,0,now()]).map_err(|e|e.to_string()).map(|_|())
+        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"input",text,crate::ansi::strip_ansi(text),0,now()]).map_err(|e|e.to_string()).map(|_|())
     }
     pub fn history_chunks(&self, id: &str, since: i64, limit: i64) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
@@ -403,6 +436,33 @@ impl DataStore {
             cursor = seq;
         }
         Ok(json!({"raw":raw,"cursor":cursor}))
+    }
+    /// 当前可见屏幕：把全部原始输出重放进 VT 模拟器后的画面。
+    pub fn screen(&self, id: &str) -> Result<Value, String> {
+        let c = self.conn.lock().unwrap();
+        let (cols, rows): (i64, i64) = c
+            .query_row("SELECT cols,rows FROM sessions WHERE id=?", [id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Session not found".to_string())?;
+        let mut statement = c.prepare("SELECT data_raw FROM history_chunks WHERE session_id=? AND direction='output' ORDER BY seq").map_err(|e| e.to_string())?;
+        let rows_iter = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let mut screen = crate::screen::ScreenEmulator::new(
+            (cols.max(1) as usize).min(1000),
+            (rows.max(1) as usize).min(500),
+        );
+        for row in rows_iter {
+            screen.feed(&row.map_err(|e| e.to_string())?);
+        }
+        Ok(json!({
+            "screen": screen.snapshot(),
+            "cols": cols,
+            "rows": rows,
+        }))
     }
     pub fn webhooks(&self) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
@@ -715,7 +775,7 @@ fn ensure_private_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|e| format!("创建数据目录失败: {e}"))
 }
 fn initialize_schema(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY,name TEXT NOT NULL,unique_id TEXT,connect_type TEXT NOT NULL DEFAULT 'ssh',command TEXT,host TEXT NOT NULL DEFAULT '',port INTEGER NOT NULL DEFAULT 22,username TEXT NOT NULL DEFAULT '',auth_type TEXT NOT NULL DEFAULT 'password',encrypted_password TEXT,encrypted_private_key TEXT,encrypted_passphrase TEXT,term TEXT NOT NULL DEFAULT 'xterm-256color',cols INTEGER NOT NULL DEFAULT 160,rows INTEGER NOT NULL DEFAULT 42,prompt_regex TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY,profile_id TEXT NOT NULL,profile_name TEXT NOT NULL,target TEXT NOT NULL,state TEXT NOT NULL,mode TEXT NOT NULL DEFAULT 'AUTO',cols INTEGER NOT NULL,rows INTEGER NOT NULL,created_at INTEGER NOT NULL,closed_at INTEGER,close_reason TEXT,exit_code INTEGER,name TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT 'unknown'); CREATE TABLE IF NOT EXISTS history_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL,seq INTEGER NOT NULL,direction TEXT NOT NULL,data_raw TEXT NOT NULL,data_plain TEXT NOT NULL,internal INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS webhooks (id TEXT PRIMARY KEY,url TEXT NOT NULL,events TEXT NOT NULL DEFAULT '[]',created_at INTEGER NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_unique_id ON profiles(unique_id) WHERE unique_id IS NOT NULL; CREATE INDEX IF NOT EXISTS idx_history_session_seq ON history_chunks(session_id,seq);").map_err(|e|e.to_string())
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY,name TEXT NOT NULL,unique_id TEXT,connect_type TEXT NOT NULL DEFAULT 'ssh',command TEXT,host TEXT NOT NULL DEFAULT '',port INTEGER NOT NULL DEFAULT 22,username TEXT NOT NULL DEFAULT '',auth_type TEXT NOT NULL DEFAULT 'password',encrypted_password TEXT,encrypted_private_key TEXT,encrypted_passphrase TEXT,term TEXT NOT NULL DEFAULT 'xterm-256color',cols INTEGER NOT NULL DEFAULT 160,rows INTEGER NOT NULL DEFAULT 42,prompt_regex TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY,profile_id TEXT NOT NULL,profile_name TEXT NOT NULL,target TEXT NOT NULL,state TEXT NOT NULL,mode TEXT NOT NULL DEFAULT 'AUTO',cols INTEGER NOT NULL,rows INTEGER NOT NULL,created_at INTEGER NOT NULL,closed_at INTEGER,close_reason TEXT,exit_code INTEGER,name TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT 'unknown'); CREATE TABLE IF NOT EXISTS history_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL,seq INTEGER NOT NULL,direction TEXT NOT NULL,data_raw TEXT NOT NULL,data_plain TEXT NOT NULL,internal INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS webhooks (id TEXT PRIMARY KEY,url TEXT NOT NULL,events TEXT NOT NULL DEFAULT '[]',created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_unique_id ON profiles(unique_id) WHERE unique_id IS NOT NULL; CREATE INDEX IF NOT EXISTS idx_history_session_seq ON history_chunks(session_id,seq);").map_err(|e|e.to_string())
 }
 fn decode_key(raw: &str) -> Result<[u8; 32], String> {
     if raw.len() != 64 {
@@ -743,82 +803,50 @@ fn random_token() -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-fn load_mcp_state(path: &Path) -> Result<Value, String> {
-    let raw = match fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(json!({"enabled": true, "token": ""}));
+fn validate_mcp_state(state: &Value) -> Result<(), String> {
+    let object = state
+        .as_object()
+        .ok_or_else(|| "MCP 配置必须是 JSON 对象".to_string())?;
+    if let Some(enabled) = object.get("enabled") {
+        if !enabled.is_boolean() {
+            return Err("MCP 配置 enabled 必须是布尔值".into());
         }
+    }
+    if let Some(token) = object.get("token") {
+        if !token.is_string() {
+            return Err("MCP 配置 token 必须是字符串".into());
+        }
+    }
+    Ok(())
+}
+
+/// 旧版本把 MCP 开关/token 存在数据目录的 mcp.json，迁移进 settings 表后删除该文件。
+/// 解析失败时保留文件并报错，避免丢配置；settings 表已有值时不覆盖。
+fn migrate_legacy_mcp_json(conn: &Connection, data_home: &Path) -> Result<(), String> {
+    let path = data_home.join("mcp.json");
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(format!("读取 MCP 配置失败: {error}")),
     };
     let state: Value =
         serde_json::from_str(&raw).map_err(|error| format!("解析 MCP 配置失败: {error}"))?;
-    let object = state
-        .as_object()
-        .ok_or_else(|| "MCP 配置必须是 JSON 对象".to_string())?;
-    if let Some(enabled) = object.get("enabled") {
-        if !enabled.is_boolean() {
-            return Err("MCP 配置 enabled 必须是布尔值".into());
-        }
+    validate_mcp_state(&state)?;
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM settings WHERE key='mcp')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !exists {
+        conn.execute(
+            "INSERT INTO settings (key,value) VALUES ('mcp',?1)",
+            rusqlite::params![serde_json::to_string(&state).map_err(|e| e.to_string())?],
+        )
+        .map_err(|e| e.to_string())?;
     }
-    if let Some(token) = object.get("token") {
-        if !token.is_string() {
-            return Err("MCP 配置 token 必须是字符串".into());
-        }
-    }
-    Ok(state)
-}
-
-fn save_mcp_state(path: &Path, state: &Value) -> Result<(), String> {
-    let object = state
-        .as_object()
-        .ok_or_else(|| "MCP 配置必须是 JSON 对象".to_string())?;
-    if let Some(enabled) = object.get("enabled") {
-        if !enabled.is_boolean() {
-            return Err("MCP 配置 enabled 必须是布尔值".into());
-        }
-    }
-    if let Some(token) = object.get("token") {
-        if !token.is_string() {
-            return Err("MCP 配置 token 必须是字符串".into());
-        }
-    }
-    if let Some(parent) = path.parent() {
-        ensure_private_dir(parent)?;
-    }
-    let temp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    let bytes = serde_json::to_vec_pretty(state)
-        .map_err(|error| format!("序列化 MCP 配置失败: {error}"))?;
-    {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options
-            .open(&temp)
-            .map_err(|error| format!("创建 MCP 配置临时文件失败: {error}"))?;
-        if let Err(error) = file.write_all(&bytes).and_then(|_| file.sync_all()) {
-            let _ = fs::remove_file(&temp);
-            return Err(format!("写入 MCP 配置失败: {error}"));
-        }
-    }
-    if let Err(error) = fs::rename(&temp, path) {
-        let _ = fs::remove_file(&temp);
-        return Err(format!("保存 MCP 配置失败: {error}"));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(path)
-            .map_err(|error| format!("读取 MCP 配置权限失败: {error}"))?
-            .permissions();
-        permissions.set_mode(0o600);
-        fs::set_permissions(path, permissions)
-            .map_err(|error| format!("设置 MCP 配置权限失败: {error}"))?;
-    }
+    fs::remove_file(&path).map_err(|error| format!("删除旧 MCP 配置失败: {error}"))?;
     Ok(())
 }
 
@@ -994,22 +1022,66 @@ mod tests {
     }
 
     #[test]
-    fn mcp_state_defaults_validates_and_round_trips() {
-        let home = test_dir("mcp-state");
-        let path = home.join("mcp.json");
+    #[test]
+    fn mcp_state_persists_in_settings_table_and_migrates_mcp_json() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
+        // 默认值: enabled=true, token 为空
+        assert_eq!(db.mcp_state().unwrap(), json!({"enabled": true, "token": ""}));
+        // 配置写入 settings 表
+        let info = db.mcp_config(&json!({"enabled": false, "regenerateToken": true})).unwrap();
+        assert_eq!(info["enabled"], json!(false));
+        assert_ne!(info["token"], json!(""));
+        assert_eq!(db.mcp_state().unwrap(), json!({"enabled": false, "token": info["token"]}));
+        // 空token首次读取时自动生成并持久化
+        let first = db.mcp_info().unwrap();
+        assert_ne!(first["token"], json!(""));
+        assert_eq!(db.mcp_state().unwrap(), json!({"enabled": false, "token": first["token"]}));
+    }
+
+    #[test]
+    fn migration_imports_legacy_mcp_json_into_settings_and_removes_it() {
+        let home = test_dir("mcp-migrate");
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        let legacy = json!({"enabled": false, "token": "legacy-token"});
+        fs::write(home.join("mcp.json"), serde_json::to_vec(&legacy).unwrap()).unwrap();
+        migrate_legacy_mcp_json(&conn, &home).unwrap();
+        let stored: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key='mcp'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), legacy);
+        assert!(!home.join("mcp.json").exists());
+        // 幂等: mcp.json 已不存在时不覆盖已有设置
+        conn.execute(
+            "UPDATE settings SET value='{\"enabled\":true,\"token\":\"changed\"}' WHERE key='mcp'",
+            [],
+        )
+        .unwrap();
+        migrate_legacy_mcp_json(&conn, &home).unwrap();
+        let stored: String = conn
+            .query_row("SELECT value FROM settings WHERE key='mcp'", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(
-            load_mcp_state(&path).unwrap(),
-            json!({"enabled": true, "token": ""})
+            serde_json::from_str::<Value>(&stored).unwrap(),
+            json!({"enabled": true, "token": "changed"})
         );
-        save_mcp_state(&path, &json!({"enabled": false, "token": "test-token"})).unwrap();
-        assert_eq!(
-            load_mcp_state(&path).unwrap(),
-            json!({"enabled": false, "token": "test-token"})
-        );
-        fs::write(&path, "[]").unwrap();
-        assert!(load_mcp_state(&path).is_err());
-        fs::write(&path, r#"{"enabled":"yes"}"#).unwrap();
-        assert!(load_mcp_state(&path).is_err());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn migration_fails_on_malformed_legacy_mcp_json_and_keeps_it() {
+        let home = test_dir("mcp-bad");
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        fs::write(home.join("mcp.json"), r#"{"enabled":"yes"}"#).unwrap();
+        assert!(migrate_legacy_mcp_json(&conn, &home).is_err());
+        assert!(home.join("mcp.json").exists());
         fs::remove_dir_all(home).unwrap();
     }
 }

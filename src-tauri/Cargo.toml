@@ -21,6 +21,7 @@ aes-gcm = "0.10"
 base64 = "0.22"
 rand = "0.9"
 portable-pty = "0.8.1"
+vte = { version = "0.13", features = ["ansi"] }
 
 [profile.release]
 codegen-units = 1
