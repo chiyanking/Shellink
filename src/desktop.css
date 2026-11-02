@@ -1318,7 +1318,7 @@ select {
 .terminal-output {
   flex: 1;
   overflow-x: auto;
-  padding: 12px 14px;
+  padding: 4px 0 4px 6px;
   background: var(--terminal-canvas);
   font: 11px/1.8 var(--font-mono);
   color: var(--terminal-foreground);
@@ -1341,6 +1341,9 @@ select {
 .terminal-viewport,
 .terminal-viewport > .xterm {
   height: 100%;
+}
+.terminal-viewport .xterm-viewport {
+  background: var(--terminal-canvas);
 }
 .terminal-welcome {
   display: flex;
@@ -2828,7 +2831,6 @@ select {
   }
   .terminal-output {
     font-size: 12px;
-    padding: 14px 18px;
   }
   .terminal-table {
     font-size: 10px;
@@ -3097,9 +3099,6 @@ select {
   }
   .terminal-session-id code {
     max-width: none;
-  }
-  .terminal-output {
-    padding: 17px 15px;
   }
   .terminal-task-note {
     flex-wrap: wrap;

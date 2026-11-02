@@ -64,6 +64,8 @@ function TerminalContent({ session }: { session: Session }) {
       cursorBlink: true,
       fontFamily: `"${font}", monospace`,
       fontSize: Number(fontSize),
+      // xterm 6 uses this width for both its scrollbar and FitAddon's column budget.
+      overviewRuler: { width: 6 },
       theme: {
         background: token('--terminal-canvas', '#121317'),
         foreground: token('--terminal-foreground', '#aeb4c1'),
