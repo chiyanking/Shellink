@@ -2,7 +2,6 @@ mod ansi;
 mod bridge;
 mod data;
 mod mcp;
-mod screen;
 mod sessions;
 mod ssh_auth;
 pub use ssh_auth::run_askpass;
@@ -20,6 +19,8 @@ pub fn run() {
         .manage(Arc::new(sessions::SessionManager::new()))
         .manage(mcp::Server::new())
         .setup(|app| {
+            app.state::<Arc<sessions::SessionManager>>()
+                .start_reaper(app.handle().clone());
             app.state::<mcp::Server>().start(app.handle().clone());
             Ok(())
         })

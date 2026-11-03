@@ -253,34 +253,18 @@ export function IntegrationsPage() {
   const [httpEnabled, setHttpEnabled] = useState(mcp?.httpEnabled ?? false)
   const [busy, setBusy] = useState(false)
   const executable = mcp?.command ?? ''
-  const config =
-    transport === 'http'
-      ? JSON.stringify(
-          {
-            mcpServers: {
-              shellink: {
-                url: mcp?.url ?? '',
-                headers: { Authorization: `Bearer ${mcp?.token ?? ''}` },
-              },
-            },
-          },
-          null,
-          2,
-        )
-      : client === 'Codex'
-        ? `[mcp_servers.shellink]\ncommand = ${JSON.stringify(executable)}\nargs = ["mcp"]`
-        : JSON.stringify(
-            {
-              mcpServers: {
-                shellink: {
-                  command: executable,
-                  args: ['mcp'],
-                },
-              },
-            },
-            null,
-            2,
-          )
+  const stdioEnv = mcp?.stdioEnv ?? {}
+  const config = client === 'Codex'
+    ? transport === 'http'
+      ? `[mcp_servers.shellink]\nurl = ${JSON.stringify(mcp?.url ?? '')}\nhttp_headers = { Authorization = ${JSON.stringify(`Bearer ${mcp?.token ?? ''}`)} }`
+      : `[mcp_servers.shellink]\ncommand = ${JSON.stringify(executable)}\nargs = ["mcp"]\nenv = { ${Object.entries(stdioEnv).map(([key, value]) => `${key} = ${JSON.stringify(value)}`).join(', ')} }`
+    : JSON.stringify({
+        mcpServers: {
+          shellink: transport === 'http'
+            ? { ...(client === 'Claude Code' ? { type: 'http' } : {}), url: mcp?.url ?? '', headers: { Authorization: `Bearer ${mcp?.token ?? ''}` } }
+            : { command: executable, args: ['mcp'], env: stdioEnv },
+        },
+      }, null, 2)
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text)
@@ -363,7 +347,7 @@ export function IntegrationsPage() {
             <div className="config-code-heading">
               <span>
                 <Braces size={13} />
-                {client === 'Codex' && transport === 'stdio' ? 'config.toml' : 'mcp.json'}
+                {client === 'Codex' ? 'config.toml' : 'mcp.json'}
                 <Badge>本机配置</Badge>
               </span>
               <Button
@@ -381,7 +365,9 @@ export function IntegrationsPage() {
           </div>
           <div className="integration-note">
             <CircleHelp size={14} />
-            <span>配置由当前桌面后台生成。</span>
+            <span>{transport === 'stdio'
+              ? mcp?.stdioRunning ? 'stdio 已就绪，关闭 HTTP 后仍可使用；需要保持 Shellink 桌面运行。' : mcp?.stdioError ?? 'stdio 尚未就绪，请检查桌面后台状态。'
+              : mcp?.running ? 'HTTP 已启动，使用当前地址和 Token 连接。' : mcp?.error ?? 'HTTP 尚未启动，请开启右侧 MCP HTTP 开关。'}</span>
           </div>
           <div className="integration-next-step">
             <span className="step-number">2</span>
@@ -440,7 +426,7 @@ export function IntegrationsPage() {
                 aria-label="启用 MCP HTTP"
               />
             </div>
-            <p>{mcp?.httpEnabled ? '本机 HTTP · 独立令牌认证' : 'HTTP MCP 已关闭'}</p>
+            <p>{mcp?.httpEnabled ? mcp.running ? 'HTTP 已启动 · Token 认证' : mcp.error ?? 'HTTP 启动失败' : 'HTTP MCP 已关闭，stdio 仍可使用'}</p>
             <span>{mcp?.url ?? '服务地址不可用'}</span>
             {mcp?.httpEnabled && <Button variant="outline" size="sm" disabled={busy} onClick={async () => { setBusy(true); try { await rpc('mcp.config',{regenerateToken:true}); await refresh(); notify('已轮换 MCP Token') } catch(error) { notify(String(error)) } finally { setBusy(false) } }}>轮换 Token</Button>}
           </section>

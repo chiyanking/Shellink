@@ -34,6 +34,8 @@ struct SpawnedSession {
 pub struct SessionManager {
     live: Mutex<HashMap<String, Live>>,
     next_id: AtomicU64,
+    stopping: AtomicBool,
+    reaper: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl SessionManager {
@@ -41,7 +43,26 @@ impl SessionManager {
         Self {
             live: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
+            stopping: AtomicBool::new(false),
+            reaper: Mutex::new(None),
         }
+    }
+
+    pub fn start_reaper(self: &Arc<Self>, app: AppHandle) {
+        let manager = Arc::downgrade(self);
+        *self.reaper.lock().unwrap() = Some(thread::spawn(move || {
+            loop {
+                let Some(manager) = manager.upgrade() else {
+                    break;
+                };
+                if manager.stopping.load(Ordering::Acquire) {
+                    break;
+                }
+                manager.reap_finished(&app.state::<DataStore>());
+                drop(manager);
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }));
     }
 
     pub fn create(
@@ -55,6 +76,10 @@ impl SessionManager {
         cols: i64,
         rows: i64,
     ) -> Result<Value, String> {
+        let mut sessions = self.live.lock().unwrap();
+        if self.stopping.load(Ordering::Acquire) {
+            return Err("Session manager is stopping".into());
+        }
         if mode != "AUTO" && mode != "MANUAL" {
             return Err("mode must be AUTO or MANUAL".into());
         }
@@ -93,7 +118,8 @@ impl SessionManager {
         let output_app = app.clone();
         let output_id = id.clone();
         let output_finished = live.output_finished.clone();
-        self.live.lock().unwrap().insert(id.clone(), live);
+        sessions.insert(id.clone(), live);
+        drop(sessions);
         thread::spawn(move || {
             read_output(&output_app, &output_id, &mut output);
             output_finished.store(true, Ordering::Release);
@@ -126,10 +152,10 @@ impl SessionManager {
         manual: bool,
     ) -> Result<Value, String> {
         self.reap_finished(db);
+        let mut live = self.live.lock().unwrap();
         if db.session_mode(id)? == "MANUAL" && !manual {
             return Err("Session is in MANUAL mode".into());
         }
-        let mut live = self.live.lock().unwrap();
         let session = live.get_mut(id).ok_or("Session not found")?;
         if session
             .auth
@@ -192,8 +218,11 @@ impl SessionManager {
     }
 
     pub fn set_mode(&self, db: &DataStore, id: &str, mode: &str) -> Result<Value, String> {
+        // Serialize a mode change with input so a completed switch takes effect immediately.
+        let _live = self.live.lock().unwrap();
         db.update_session_mode(id, mode)
     }
+
     pub fn resize(&self, db: &DataStore, id: &str, cols: i64, rows: i64) -> Result<Value, String> {
         if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
             return Err("Terminal dimensions are invalid".into());
@@ -245,6 +274,10 @@ impl SessionManager {
         db.remove_session(id)
     }
     pub fn shutdown(&self, db: &DataStore) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(reaper) = self.reaper.lock().unwrap().take() {
+            let _ = reaper.join();
+        }
         let ids: Vec<String> = self.live.lock().unwrap().keys().cloned().collect();
         for id in ids {
             let _ = self.close(db, &id);
@@ -456,6 +489,7 @@ fn spawn_terminal(
 fn read_output(app: &AppHandle, id: &str, stream: &mut impl Read) {
     let mut buf = [0u8; 8192];
     let mut pending = Vec::new();
+    let mut ansi = crate::ansi::AnsiStripper::default();
     loop {
         match stream.read(&mut buf) {
             Ok(0) | Err(_) => break,
@@ -471,21 +505,22 @@ fn read_output(app: &AppHandle, id: &str, stream: &mut impl Read) {
                 }
                 let text = String::from_utf8_lossy(&pending[..valid]).into_owned();
                 pending.drain(..valid);
-                emit_output(app, id, &text);
+                emit_output(app, id, &text, &ansi.feed(&text));
             }
         }
     }
     if !pending.is_empty() {
-        emit_output(app, id, &String::from_utf8_lossy(&pending));
+        let text = String::from_utf8_lossy(&pending);
+        emit_output(app, id, &text, &ansi.feed(&text));
     }
 }
 
-fn emit_output(app: &AppHandle, id: &str, text: &str) {
+fn emit_output(app: &AppHandle, id: &str, text: &str, plain: &str) {
     let db = app.state::<DataStore>();
-    let Ok(seq) = db.add_output(id, text) else {
+    let Ok(seq) = db.add_output_plain(id, text, plain) else {
         return;
     };
-    let event = json!({"event":"session.data","seq":seq,"data":{"sessionId":id,"direction":"output","raw":text,"plain":text,"seq":seq}});
+    let event = json!({"event":"session.data","seq":seq,"data":{"sessionId":id,"direction":"output","raw":text,"plain":plain,"seq":seq}});
     if app
         .try_state::<Arc<crate::bridge::Backend>>()
         .is_none_or(|backend| backend.allows_event(&event))
@@ -503,6 +538,68 @@ fn cleanup_key(path: Option<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_switches_and_raw_input_preserve_exact_bytes() {
+        struct Capture(Arc<Mutex<Vec<u8>>>);
+        impl Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "MANUAL")
+            .unwrap();
+        let manager = SessionManager::new();
+        let mut command = CommandBuilder::new("/bin/sleep");
+        command.arg("30");
+        let (mut live, _output) = spawn_terminal(command, 120, 36).unwrap();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        live.input = Arc::new(Mutex::new(Box::new(Capture(captured.clone()))));
+        manager.live.lock().unwrap().insert("s".into(), live);
+        assert!(manager.input(&db, "s", "blocked", true, false).is_err());
+        manager.set_mode(&db, "s", "AUTO").unwrap();
+        manager
+            .input(&db, "s", "\x03\t\x1b[A", false, false)
+            .unwrap();
+        manager.input(&db, "s", "", true, false).unwrap();
+        manager.input(&db, "s", "pwd", true, false).unwrap();
+        assert_eq!(&*captured.lock().unwrap(), b"\x03\t\x1b[A\npwd\n");
+        manager.set_mode(&db, "s", "MANUAL").unwrap();
+        assert!(manager.input(&db, "s", "blocked", true, false).is_err());
+        manager.shutdown(&db);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manager_state_reaps_exited_process_and_records_exit_code() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        let manager = SessionManager::new();
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", "exit 7"]);
+        let (live, mut output) = spawn_terminal(command, 120, 36).unwrap();
+        let _ = output.read_to_end(&mut Vec::new());
+        live.output_finished.store(true, Ordering::Release);
+        manager.live.lock().unwrap().insert("s".into(), live);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let state = manager.state(&db, "s").unwrap();
+            if state["active"] == false {
+                assert_eq!(state["exitCode"], 7);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            thread::yield_now();
+        }
+        assert_eq!(manager.list(&db).unwrap()[0]["active"], false);
+    }
 
     #[cfg(unix)]
     #[test]

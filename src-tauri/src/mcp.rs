@@ -1,18 +1,25 @@
-use crate::ansi::strip_ansi;
 use crate::{data::DataStore, sessions::SessionManager};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     io::{self, BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager};
+
+mod stdio;
+mod transport;
+pub use stdio::run_stdio;
+use transport::{Listener, spawn_listener};
+
+const SUPPORTED_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
@@ -25,7 +32,7 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     (
         "shellink_create_profile",
         "Create a Shellink connection profile. SSH profiles use host, port, username and authentication fields.",
-        r#"{"type":"object","properties":{"name":{"type":"string","description":"Profile display name"},"connectType":{"type":"string","enum":["ssh","command"]},"host":{"type":"string"},"port":{"type":"integer"},"username":{"type":"string"},"authType":{"type":"string","enum":["password","password-mfa","key","keyboard-interactive"]},"password":{"type":"string","description":"Plaintext password (encrypted by Shellink)"},"privateKey":{"type":"string","description":"Private key (encrypted by Shellink)"},"passphrase":{"type":"string"},"command":{"type":"string","description":"Command for connectType=command"},"term":{"type":"string"}},"required":["name","connectType"]}"#,
+        r#"{"type":"object","properties":{"name":{"type":"string","description":"Profile display name"},"connectType":{"type":"string","enum":["ssh","command"]},"host":{"type":"string"},"port":{"type":"integer","minimum":1,"maximum":65535},"username":{"type":"string"},"authType":{"type":"string","enum":["password","password-mfa","key","keyboard-interactive"]},"password":{"type":"string","description":"Plaintext password (encrypted by Shellink)"},"privateKey":{"type":"string","description":"Private key (encrypted by Shellink)"},"passphrase":{"type":"string"},"command":{"type":"string","description":"Command for connectType=command"},"term":{"type":"string"}},"required":["name","connectType"]}"#,
     ),
     (
         "shellink_list_sessions",
@@ -44,17 +51,17 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "shellink_read_output",
-        "Read recent terminal output (plain text, ANSI stripped) of a session. Returns the LATEST chunks: default 400 chunks, max 10000, oldest-first within the result.",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","description":"Max number of recent history chunks (default 400, max 10000)"}},"required":["id"]}"#,
+        "Read plain terminal logs in chronological order (default 400 chunks, max 10000). Omit afterSeq for recent logs; use afterSeq=0 for full history. Resume with afterSeq=nextSeq and afterOffset=nextOffset, including partial chunks. maxChars bounds the response. With afterSeq, timeoutMs waits for new output or session exit. This is a log stream, not a rendered terminal screen.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10000,"default":400},"afterSeq":{"type":"integer","minimum":0},"afterOffset":{"type":"integer","minimum":0,"default":0},"maxChars":{"type":"integer","minimum":1,"maximum":65536,"default":16000},"timeoutMs":{"type":"integer","minimum":0,"maximum":30000,"default":0}},"required":["id"]}"#,
     ),
     (
         "shellink_send_input",
-        "Send text input to a session (as if typed into the terminal).",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string"}},"required":["id","text"]}"#,
+        "Send text to an AUTO session. appendNewline defaults to true for commands. Set it to false for raw keys: Ctrl-C=\\u0003, Tab=\\t, Escape=\\u001b, Up=\\u001b[A. Empty text with appendNewline=true sends Enter. Use read_output to observe the result.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144},"appendNewline":{"type":"boolean","default":true}},"required":["id","text"]}"#,
     ),
     (
         "shellink_set_mode",
-        "Set a session's input mode to AUTO (MCP/AI input allowed) or MANUAL (human typing only).",
+        "Switch a session between AUTO (MCP input allowed) and MANUAL (human typing only). MCP may switch back to AUTO to resume work; this is a collaboration mode, not an authorization boundary.",
         r#"{"type":"object","properties":{"id":{"type":"string"},"mode":{"type":"string","enum":["AUTO","MANUAL"]}},"required":["id","mode"]}"#,
     ),
     (
@@ -62,124 +69,14 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
         "Close/terminate a session.",
         r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
     ),
-    (
-        "shellink_screen",
-        "Get the currently visible screen of a session, rendered through a VT100 screen emulator (what the user sees right now). Use this for full-screen apps (vim, top, htop) and redraw-heavy output (progress bars, status lines) where shellink_read_output gives scrambled text; prefer shellink_read_output for ordinary streamed logs.",
-        r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
-    ),
 ];
-
-pub fn run_stdio() {
-    let db = match DataStore::open() {
-        Ok(db) => db,
-        Err(error) => {
-            let _ = writeln!(io::stderr(), "Shellink MCP stdio unavailable: {error}");
-            return;
-        }
-    };
-    let token = match db.mcp_info() {
-        Ok(info) => info
-            .get("token")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        Err(error) => {
-            let _ = writeln!(io::stderr(), "Shellink MCP configuration unavailable: {error}");
-            return;
-        }
-    };
-    let stdin = io::stdin();
-    let mut stdout = io::BufWriter::new(io::stdout().lock());
-    for line in stdin.lock().lines() {
-        let line = match line {
-            Ok(line) if !line.trim().is_empty() => line,
-            Ok(_) => continue,
-            Err(error) => {
-                let _ = writeln!(io::stderr(), "Shellink MCP stdio read failed: {error}");
-                break;
-            }
-        };
-        let request: Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(error) => {
-                let response = json!({"jsonrpc":"2.0","id":Value::Null,"error":{"code":-32700,"message":format!("parse error: {error}")}});
-                let _ = writeln!(stdout, "{response}");
-                let _ = stdout.flush();
-                continue;
-            }
-        };
-        let notification = !request.as_object().is_some_and(|object| object.contains_key("id"));
-        match stdio_http_request(&token, &request) {
-            Ok(Some(response)) if !notification => {
-                let _ = writeln!(stdout, "{response}");
-                let _ = stdout.flush();
-            }
-            Ok(_) => {}
-            Err(error) if !notification => {
-                let id = request.get("id").cloned().unwrap_or(Value::Null);
-                let response = json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":error}});
-                let _ = writeln!(stdout, "{response}");
-                let _ = stdout.flush();
-            }
-            Err(error) => {
-                let _ = writeln!(io::stderr(), "Shellink MCP request failed: {error}");
-            }
-        }
-    }
-}
-
-fn stdio_http_request(token: &str, request: &Value) -> Result<Option<Value>, String> {
-    let host = bind_host();
-    let connect_host = if host == "0.0.0.0" || host == "::" { "127.0.0.1" } else { host.as_str() };
-    let mut stream = TcpStream::connect((connect_host, http_port()))
-        .map_err(|error| format!("Desktop MCP HTTP is unavailable: {error}"))?;
-    let body = serde_json::to_vec(request).map_err(|error| error.to_string())?;
-    write!(
-        stream,
-        "POST /shellink/mcp HTTP/1.1\r\nHost: {connect_host}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    )
-    .map_err(|error| error.to_string())?;
-    stream.write_all(&body).map_err(|error| error.to_string())?;
-    stream.flush().map_err(|error| error.to_string())?;
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .map_err(|error| error.to_string())?;
-    let header_end = response
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .ok_or("invalid Desktop MCP HTTP response")?;
-    let header = String::from_utf8_lossy(&response[..header_end]);
-    let status = header
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(500);
-    let payload = &response[header_end + 4..];
-    if status == 202 || payload.is_empty() {
-        return Ok(None);
-    }
-    let value: Value = serde_json::from_slice(payload).map_err(|error| error.to_string())?;
-    if status >= 400 {
-        return Err(value
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("Desktop MCP request failed")
-            .to_owned());
-    }
-    Ok(Some(value))
-}
-
-struct Listener {
-    stop: Arc<AtomicBool>,
-    running: Arc<AtomicBool>,
-    join: thread::JoinHandle<()>,
-}
 
 pub struct Server {
     listener: Mutex<Option<Listener>>,
+    bridge: Mutex<Option<Listener>>,
+    discovery: Mutex<Option<(PathBuf, String)>>,
+    configuration: Mutex<()>,
+    bridge_error: Mutex<Option<String>>,
     error: Mutex<Option<String>>,
     messages: Mutex<Vec<Value>>,
 }
@@ -188,6 +85,10 @@ impl Server {
     pub fn new() -> Self {
         Self {
             listener: Mutex::new(None),
+            bridge: Mutex::new(None),
+            discovery: Mutex::new(None),
+            configuration: Mutex::new(()),
+            bridge_error: Mutex::new(None),
             error: Mutex::new(None),
             messages: Mutex::new(Vec::new()),
         }
@@ -195,6 +96,9 @@ impl Server {
 
     pub fn start(&self, app: AppHandle) {
         let db = app.state::<DataStore>();
+        if let Err(error) = self.start_bridge(&app, &db) {
+            *self.bridge_error.lock().unwrap() = Some(error);
+        }
         if let Err(error) = self.reconfigure(&app, &db) {
             *self.error.lock().unwrap() = Some(error);
         }
@@ -202,10 +106,38 @@ impl Server {
 
     pub fn info(&self, db: &DataStore) -> Result<Value, String> {
         let mut info = db.mcp_info()?;
-        let enabled = info.get("enabled").and_then(Value::as_bool).unwrap_or(true) && http_enabled();
+        let enabled =
+            info.get("enabled").and_then(Value::as_bool).unwrap_or(true) && http_enabled();
         let error = self.error.lock().unwrap().clone();
         apply_server_info(&mut info, enabled, self.is_running(), error.as_deref());
+        info["stdioRunning"] = json!(
+            self.bridge
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|listener| listener.running.load(Ordering::Acquire))
+        );
+        if let Some(error) = self.bridge_error.lock().unwrap().as_ref() {
+            info["stdioError"] = json!(error);
+        }
         Ok(info)
+    }
+
+    fn start_bridge(&self, app: &AppHandle, db: &DataStore) -> Result<(), String> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
+        let address = listener.local_addr().map_err(|e| e.to_string())?;
+        let listener = spawn_listener(listener, app.clone(), true).map_err(|e| e.to_string())?;
+        match stdio::write_discovery(db.data_home(), address) {
+            Ok(discovery) => {
+                *self.discovery.lock().unwrap() = Some(discovery);
+                *self.bridge.lock().unwrap() = Some(listener);
+                Ok(())
+            }
+            Err(error) => {
+                listener.stop();
+                Err(error)
+            }
+        }
     }
 
     pub fn update_config(
@@ -219,42 +151,21 @@ impl Server {
     }
 
     pub fn reconfigure(&self, app: &AppHandle, db: &DataStore) -> Result<Value, String> {
+        let _configuration = self.configuration.lock().unwrap();
         self.stop_listener();
         let mut info = db.mcp_info()?;
-        let enabled = info.get("enabled").and_then(Value::as_bool).unwrap_or(true) && http_enabled();
+        let enabled =
+            info.get("enabled").and_then(Value::as_bool).unwrap_or(true) && http_enabled();
         *self.error.lock().unwrap() = None;
 
-        if enabled && http_enabled() {
+        if enabled {
             let host = bind_host();
             let port = http_port();
             match TcpListener::bind((host.as_str(), port)) {
                 Ok(listener) => {
-                    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-                    let stop = Arc::new(AtomicBool::new(false));
-                    let running = Arc::new(AtomicBool::new(true));
-                    let thread_stop = stop.clone();
-                    let thread_running = running.clone();
-                    let app = app.clone();
-                    let join = thread::spawn(move || {
-                        while !thread_stop.load(Ordering::Acquire) {
-                            match listener.accept() {
-                                Ok((stream, _)) => {
-                                    let app = app.clone();
-                                    thread::spawn(move || handle(stream, app));
-                                }
-                                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                                    thread::sleep(Duration::from_millis(25));
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                        thread_running.store(false, Ordering::Release);
-                    });
-                    *self.listener.lock().unwrap() = Some(Listener {
-                        stop,
-                        running,
-                        join,
-                    });
+                    *self.listener.lock().unwrap() = Some(
+                        spawn_listener(listener, app.clone(), false).map_err(|e| e.to_string())?,
+                    );
                 }
                 Err(error) => {
                     *self.error.lock().unwrap() =
@@ -269,7 +180,16 @@ impl Server {
     }
 
     pub fn stop(&self) {
+        let _configuration = self.configuration.lock().unwrap();
         self.stop_listener();
+        if let Some(listener) = self.bridge.lock().unwrap().take() {
+            listener.stop();
+        }
+        if let Some((path, contents)) = self.discovery.lock().unwrap().take() {
+            if std::fs::read_to_string(&path).ok().as_deref() == Some(&contents) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 
     pub fn messages(&self) -> Value {
@@ -308,8 +228,7 @@ impl Server {
     fn stop_listener(&self) {
         let listener = self.listener.lock().unwrap().take();
         if let Some(listener) = listener {
-            listener.stop.store(true, Ordering::Release);
-            let _ = listener.join.join();
+            listener.stop();
         }
     }
 
@@ -365,8 +284,10 @@ fn http_enabled_value(value: Option<&str>) -> bool {
 
 fn mcp_url() -> String {
     let host = bind_host();
-    let display_host = if host == "0.0.0.0" || host == "::" {
+    let display_host = if host == "0.0.0.0" {
         "127.0.0.1"
+    } else if host == "::" {
+        "::1"
     } else {
         &host
     };
@@ -378,200 +299,65 @@ fn mcp_url() -> String {
     format!("http://{display_host}:{}/shellink/mcp", http_port())
 }
 
-fn handle(mut stream: TcpStream, app: AppHandle) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
-    let request = match read_request(&mut stream) {
-        Ok(request) => request,
-        Err((status, message)) => {
-            respond_error(&mut stream, status, &message);
-            return;
+fn process_request(
+    app: &AppHandle,
+    request: Value,
+    stop: &AtomicBool,
+    internal: bool,
+) -> Result<Option<Value>, (Value, i64, String)> {
+    process_request_with(request, internal, |method, params| match method {
+        "tools/call" => {
+            let db = app.state::<DataStore>();
+            let manager = app.state::<Arc<SessionManager>>();
+            call_tool_with(&db, &manager, params, stop, |profile_id| {
+                manager.create(app, &db, profile_id, "", "mcp", "AUTO", 0, 0)
+            })
         }
-    };
-    if request.method != "POST"
-        || !matches!(
-            request.path.as_str(),
-            "/shellink/mcp" | "/shellink/webhook/callback"
-        )
-    {
-        respond_error(&mut stream, 404, "not found");
-        return;
-    }
-
-    if request.path == "/shellink/webhook/callback" {
-        let body = match serde_json::from_slice::<Value>(&request.body) {
-            Ok(value) => value,
-            Err(_) => {
-                respond_error(&mut stream, 400, "request body must be valid JSON");
-                return;
-            }
-        };
-        let message = app.state::<Server>().receive_message(&app, body);
-        respond_json(&mut stream, 202, message);
-        return;
-    }
-    let db = app.state::<DataStore>();
-    let expected = match db.mcp_info() {
-        Ok(info) => info
-            .get("token")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned(),
-        Err(error) => {
-            respond_error(&mut stream, 503, &error);
-            return;
-        }
-    };
-    let auth = request
-        .headers
-        .get("authorization")
-        .map(String::as_str)
-        .unwrap_or("");
-    if expected.is_empty() || auth != format!("Bearer {expected}") {
-        respond_error(&mut stream, 401, "unauthorized");
-        return;
-    }
-
-    let parsed = match serde_json::from_slice::<Value>(&request.body) {
-        Ok(value) => value,
-        Err(_) => {
-            respond_json_rpc_error(&mut stream, 400, Value::Null, -32700, "parse error");
-            return;
-        }
-    };
-    let response = match process_request(&app, parsed) {
-        Ok(Some(response)) => response,
-        Ok(None) => {
-            let _ = write!(
-                stream,
-                "HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            );
-            return;
-        }
-        Err((id, code, message)) => {
-            json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
-        }
-    };
-    respond_json(&mut stream, 200, response);
-}
-
-struct HttpRequest {
-    method: String,
-    path: String,
-    headers: HashMap<String, String>,
-    body: Vec<u8>,
-}
-
-fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, (u16, String)> {
-    let mut reader = BufReader::new(stream);
-    let mut first = String::new();
-    reader
-        .read_line(&mut first)
-        .map_err(|error| (400, error.to_string()))?;
-    let mut parts = first.split_whitespace();
-    let method = parts.next().unwrap_or_default().to_owned();
-    let path = parts.next().unwrap_or_default().to_owned();
-    if method.is_empty() || path.is_empty() {
-        return Err((400, "invalid HTTP request line".into()));
-    }
-
-    let mut headers = HashMap::new();
-    let mut header_bytes = first.len();
-    loop {
-        let mut line = String::new();
-        let count = reader
-            .read_line(&mut line)
-            .map_err(|error| (400, error.to_string()))?;
-        if count == 0 {
-            return Err((400, "incomplete HTTP headers".into()));
-        }
-        header_bytes += count;
-        if header_bytes > MAX_HEADER_BYTES {
-            return Err((431, "HTTP headers too large".into()));
-        }
-        if line == "\r\n" || line == "\n" {
-            break;
-        }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err((400, "invalid HTTP header".into()));
-        };
-        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_owned());
-    }
-    if headers
-        .get("transfer-encoding")
-        .is_some_and(|value| !value.eq_ignore_ascii_case("identity"))
-    {
-        return Err((400, "chunked request bodies are not supported".into()));
-    }
-    let content_length = parse_content_length(headers.get("content-length").map(String::as_str))?;
-    let mut body = vec![0; content_length];
-    reader
-        .read_exact(&mut body)
-        .map_err(|error| (400, format!("incomplete request body: {error}")))?;
-    Ok(HttpRequest {
-        method,
-        path,
-        headers,
-        body,
-    })
-}
-
-fn parse_content_length(value: Option<&str>) -> Result<usize, (u16, String)> {
-    let value = value.ok_or_else(|| (411, "Content-Length is required".into()))?;
-    let length = value
-        .parse::<usize>()
-        .map_err(|_| (400, "invalid Content-Length".into()))?;
-    if length > MAX_BODY_BYTES {
-        return Err((413, "request body too large".into()));
-    }
-    Ok(length)
-}
-
-fn process_request(app: &AppHandle, request: Value) -> Result<Option<Value>, (Value, i64, String)> {
-    process_request_with(request, |method, params| match method {
-        "tools/call" => call_tool(app, params),
         _ => Err((-32601, format!("method not found: {method}"))),
     })
 }
 
 fn process_request_with(
     request: Value,
+    legacy_stdio: bool,
     dispatch: impl FnOnce(&str, &Value) -> Result<Value, (i64, String)>,
 ) -> Result<Option<Value>, (Value, i64, String)> {
     let Some(object) = request.as_object() else {
         return Err((Value::Null, -32600, "invalid request".into()));
     };
+    let id = object.get("id").cloned().unwrap_or(Value::Null);
     if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return Err((
-            object.get("id").cloned().unwrap_or(Value::Null),
-            -32600,
-            "invalid request".into(),
-        ));
+        return Err((id, -32600, "invalid request".into()));
     }
     let Some(method) = object.get("method").and_then(Value::as_str) else {
-        return Err((
-            object.get("id").cloned().unwrap_or(Value::Null),
-            -32600,
-            "method must be a string".into(),
-        ));
+        return Err((id, -32600, "method must be a string".into()));
     };
-    let notification = !object.contains_key("id");
-    let id = object.get("id").cloned().unwrap_or(Value::Null);
-    if !notification && !(id.is_string() || id.is_number() || id.is_null()) {
+    if !(id.is_string() || id.is_number() || id.is_null()) {
         return Err((Value::Null, -32600, "invalid request id".into()));
     }
-    if notification {
-        if method == "notifications/initialized" || method.starts_with("notifications/") {
-            return Ok(None);
-        }
+    if !object.contains_key("id") {
         return Ok(None);
     }
-
     let params = object.get("params").unwrap_or(&Value::Null);
+    if !params.is_null() && !params.is_object() {
+        return Err((id, -32602, "params must be an object".into()));
+    }
     let result = match method {
-        "initialize" => Ok(
-            json!({"protocolVersion":"2024-11-05","serverInfo":{"name":"shellink","version":"0.2.4"},"capabilities":{"tools":{}}}),
-        ),
+        "initialize" => match params.get("protocolVersion").and_then(Value::as_str) {
+            Some(requested) => {
+                let version = if SUPPORTED_VERSIONS.contains(&requested)
+                    && (legacy_stdio || requested != "2024-11-05")
+                {
+                    requested
+                } else {
+                    SUPPORTED_VERSIONS[0]
+                };
+                Ok(
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. For logs, resume read_output with nextSeq/nextOffset to avoid repetition. Set appendNewline=false for raw terminal keys. SSH MFA must be completed in the Desktop dialog."}),
+                )
+            }
+            None => Err((-32602, "initialize requires protocolVersion".into())),
+        },
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools": tools()})),
         "tools/call" => dispatch(method, params),
@@ -583,183 +369,362 @@ fn process_request_with(
     }
 }
 
-fn tools() -> Vec<Value> {
-    MCP_TOOLS
-        .iter()
-        .map(|(name, description, schema)| {
-            json!({"name":name,"description":description,"inputSchema":serde_json::from_str::<Value>(schema).expect("valid built-in MCP schema")})
-        })
-        .collect()
+fn input_schema(schema: &str) -> Value {
+    let mut schema: Value = serde_json::from_str(schema).expect("valid built-in MCP schema");
+    schema["additionalProperties"] = json!(false);
+    for (name, property) in schema["properties"].as_object_mut().unwrap() {
+        if property["type"] == "string" && name != "text" {
+            property["minLength"] = json!(1);
+        }
+    }
+    schema
 }
 
-fn call_tool(app: &AppHandle, params: &Value) -> Result<Value, (i64, String)> {
+fn tools() -> Vec<Value> {
+    MCP_TOOLS.iter().map(|(name, description, schema)| {
+        let read_only = matches!(*name, "shellink_list_profiles" | "shellink_list_sessions" | "shellink_session_state" | "shellink_read_output");
+        json!({"name":name,"description":description,"inputSchema":input_schema(schema),"outputSchema":output_schema(name),"annotations":{"readOnlyHint":read_only,"destructiveHint":!read_only,"idempotentHint":read_only || matches!(*name,"shellink_set_mode"|"shellink_close_session"),"openWorldHint":true}})
+    }).collect()
+}
+
+fn output_schema(name: &str) -> Value {
+    let properties = match name {
+        "shellink_list_profiles" => json!({"profiles":{"type":"array","items":{"type":"object"}}}),
+        "shellink_list_sessions" => json!({"sessions":{"type":"array","items":{"type":"object"}}}),
+        "shellink_create_profile" => json!({"id":{"type":"string"},"name":{"type":"string"}}),
+        "shellink_create_session" => {
+            json!({"id":{"type":"string"},"state":{"type":"string"},"mode":{"type":"string"},"target":{"type":"string"}})
+        }
+        "shellink_session_state" => {
+            json!({"id":{"type":"string"},"state":{"type":"string"},"mode":{"type":"string"},"active":{"type":"boolean"},"lastSeq":{"type":"integer"},"recentOutput":{"type":"string"},"exitCode":{"type":["integer","null"]}})
+        }
+        "shellink_read_output" => {
+            json!({"text":{"type":"string"},"nextSeq":{"type":"integer"},"nextOffset":{"type":"integer"},"hasMore":{"type":"boolean"},"hasEarlier":{"type":"boolean"},"active":{"type":"boolean"},"timedOut":{"type":"boolean"}})
+        }
+        "shellink_send_input" => json!({"ok":{"type":"boolean"}}),
+        "shellink_set_mode" => json!({"ok":{"type":"boolean"},"mode":{"type":"string"}}),
+        "shellink_close_session" => json!({"closed":{"type":"boolean"}}),
+        _ => unreachable!(),
+    };
+    let required: Vec<_> = properties.as_object().unwrap().keys().cloned().collect();
+    let mut properties = properties;
+    properties["error"] = json!({"type":"object","properties":{"code":{"type":"string"},"message":{"type":"string"}},"required":["code","message"]});
+    json!({"type":"object","properties":properties,"anyOf":[{"required":required},{"required":["error"]}]})
+}
+
+fn validate_arguments(args: &Value, schema: &Value) -> Result<(), String> {
+    let object = args.as_object().ok_or("tool arguments must be an object")?;
+    if let Some(required) = schema["required"].as_array() {
+        for field in required.iter().filter_map(Value::as_str) {
+            if !object.contains_key(field) {
+                return Err(format!("{field} is required"));
+            }
+        }
+    }
+    let properties = schema["properties"].as_object().unwrap();
+    for (field, value) in object {
+        let property = properties
+            .get(field)
+            .ok_or_else(|| format!("unknown argument: {field}"))?;
+        let valid_type = match property["type"].as_str() {
+            Some("string") => value.is_string(),
+            Some("integer") => value.as_i64().is_some(),
+            Some("boolean") => value.is_boolean(),
+            _ => true,
+        };
+        if !valid_type {
+            return Err(format!(
+                "{field} must be a {}",
+                property["type"].as_str().unwrap_or("valid value")
+            ));
+        }
+        if let Some(variants) = property["enum"].as_array() {
+            if !variants.contains(value) {
+                return Err(format!("{field} must be one of {}", property["enum"]));
+            }
+        }
+        if let Some(number) = value.as_i64() {
+            if property["minimum"].as_i64().is_some_and(|min| number < min)
+                || property["maximum"].as_i64().is_some_and(|max| number > max)
+            {
+                return Err(format!("{field} is outside its allowed range"));
+            }
+        }
+        if let Some(text) = value.as_str() {
+            let length = text.chars().count() as u64;
+            if property["minLength"]
+                .as_u64()
+                .is_some_and(|min| length < min)
+                || property["maxLength"]
+                    .as_u64()
+                    .is_some_and(|max| length > max)
+            {
+                return Err(format!("{field} has an invalid length"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn call_tool_with(
+    db: &DataStore,
+    manager: &SessionManager,
+    params: &Value,
+    stop: &AtomicBool,
+    create: impl FnOnce(&str) -> Result<Value, String>,
+) -> Result<Value, (i64, String)> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| (-32602, "tools/call requires a tool name".into()))?;
-    let arguments = params
+    let (_, _, schema) = MCP_TOOLS
+        .iter()
+        .find(|(tool, _, _)| *tool == name)
+        .ok_or_else(|| (-32602, format!("unknown tool: {name}")))?;
+    let args = params
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    if !arguments.is_object() {
-        return Err((-32602, "tool arguments must be an object".into()));
+    if let Err(error) = validate_arguments(&args, &input_schema(schema)) {
+        return Ok(tool_error("INVALID_ARGUMENT", &error));
     }
-    let db = app.state::<DataStore>();
-    let args = &arguments;
-    let result: Result<Value, String> =
-        match name {
-            "shellink_list_profiles" => db.profiles(None),
-            "shellink_create_profile" => db.profile_create(args),
-            "shellink_list_sessions" => db.sessions(),
-            "shellink_create_session" => {
-                let profile_id = required_string(args, "profileId").map_err(str::to_owned);
-                profile_id.and_then(|profile_id| {
-                    app.try_state::<Arc<SessionManager>>()
-                        .ok_or_else(|| "session manager unavailable".to_string())?
-                        .create(app, &db, profile_id, "", "mcp", "AUTO", 0, 0)
-                })
-            }
-            "shellink_session_state" => required_string(args, "id")
-                .map_err(str::to_owned)
-                .and_then(|id| db.session_state(id)),
-            "shellink_read_output" => {
-                let id = required_string(args, "id").map_err(str::to_owned);
-                id.and_then(|id| {
-                    let limit = args
-                        .get("limit")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(400)
-                        .clamp(1, 10_000);
-                    db.history_chunks_recent(id, limit).map(|history| {
-                        let text = history
-                            .get("items")
-                            .and_then(Value::as_array)
-                            .into_iter()
-                            .flatten()
-                            .filter(|item| {
-                                item.get("direction").and_then(Value::as_str) == Some("output")
-                            })
-                            .filter_map(|item| item.get("plain").and_then(Value::as_str))
-                            .collect::<String>();
-                        let text = strip_ansi(&text);
-                        json!({"text":text})
-                    })
-                })
-            }
-            "shellink_send_input" => {
-                required_string(args, "id")
-                    .map_err(str::to_owned)
-                    .and_then(|id| {
-                        let text = required_string(args, "text").map_err(str::to_owned)?;
-                        app.try_state::<Arc<SessionManager>>()
-                            .ok_or_else(|| "session manager unavailable".to_string())?
-                            .input(&db, id, text, true, false)
-                    })
-            }
-            "shellink_set_mode" => {
-                let id = required_string(args, "id").map_err(str::to_owned);
-                let mode = required_string(args, "mode").map_err(str::to_owned);
-                id.and_then(|id| mode.and_then(|mode| {
-                    app.try_state::<Arc<SessionManager>>()
-                        .ok_or_else(|| "session manager unavailable".to_string())?
-                        .set_mode(&db, id, mode)
-                }))
-            }
-            "shellink_close_session" => required_string(args, "id")
-                .map_err(str::to_owned)
-                .and_then(|id| {
-                    app.try_state::<Arc<SessionManager>>()
-                        .ok_or_else(|| "session manager unavailable".to_string())?
-                        .close(&db, id)
-                }),
-            "shellink_screen" => required_string(args, "id")
-                .map_err(str::to_owned)
-                .and_then(|id| db.screen(&id)),
-            _ => return Ok(tool_error(&format!("unknown tool: {name}"))),
-        };
-    match result {
-        Ok(value) => {
-            let text = if let Some(text) = value.get("text").and_then(Value::as_str) {
-                text.to_owned()
+    if name == "shellink_read_output"
+        && args.get("afterSeq").is_none()
+        && (args["afterOffset"].as_u64().unwrap_or(0) != 0
+            || args["timeoutMs"].as_u64().unwrap_or(0) != 0)
+    {
+        return Ok(tool_error(
+            "INVALID_ARGUMENT",
+            "afterSeq is required with afterOffset or timeoutMs",
+        ));
+    }
+    if stop.load(Ordering::Acquire) {
+        return Ok(tool_error("CANCELLED", "MCP listener is stopping"));
+    }
+    let id = args["id"].as_str().unwrap_or_default();
+    let result = match name {
+        "shellink_list_profiles" => db
+            .profiles(None)
+            .map(|profiles| json!({"profiles":profiles})),
+        "shellink_create_profile" => {
+            let required = if args["connectType"] == "command" {
+                &["command"][..]
             } else {
-                value.to_string()
+                &["host", "username"][..]
             };
-            Ok(json!({"content":[{"type":"text","text":text}]}))
+            for field in required {
+                if args
+                    .get(*field)
+                    .and_then(Value::as_str)
+                    .is_none_or(|v| v.trim().is_empty())
+                {
+                    return Ok(tool_error(
+                        "INVALID_ARGUMENT",
+                        &format!("{field} is required for this connectType"),
+                    ));
+                }
+            }
+            db.profile_create(&args)
         }
-        Err(error) => Ok(tool_error(&error)),
+        "shellink_list_sessions" => manager
+            .list(db)
+            .map(|sessions| json!({"sessions":sessions})),
+        "shellink_create_session" => create(args["profileId"].as_str().unwrap()),
+        "shellink_session_state" => manager.state(db, id),
+        "shellink_read_output" => read_output(db, manager, &args, stop),
+        "shellink_send_input" => manager.input(
+            db,
+            id,
+            args["text"].as_str().unwrap(),
+            args["appendNewline"].as_bool().unwrap_or(true),
+            false,
+        ),
+        "shellink_set_mode" => manager.set_mode(db, id, args["mode"].as_str().unwrap()),
+        "shellink_close_session" => manager.close(db, id),
+        _ => unreachable!(),
+    };
+    Ok(match result {
+        Ok(value) => tool_success(value),
+        Err(error) => {
+            let code = match error.as_str() {
+                "Session not found" => "SESSION_NOT_FOUND",
+                "Profile not found" => "PROFILE_NOT_FOUND",
+                "Session is in MANUAL mode" => "MANUAL_MODE",
+                "请先在 SSH 认证窗口中完成 MFA/2FA 验证" => "AUTH_REQUIRED",
+                "request cancelled" => "CANCELLED",
+                _ => "OPERATION_FAILED",
+            };
+            tool_error(code, &error)
+        }
+    })
+}
+
+fn read_output(
+    db: &DataStore,
+    manager: &SessionManager,
+    args: &Value,
+    stop: &AtomicBool,
+) -> Result<Value, String> {
+    let id = args["id"].as_str().unwrap();
+    let after_seq = args["afterSeq"].as_i64();
+    let after_offset = args["afterOffset"].as_u64().unwrap_or(0) as usize;
+    let timeout = args["timeoutMs"].as_u64().unwrap_or(0);
+    if after_seq.is_none() && (after_offset != 0 || timeout != 0) {
+        return Err("afterSeq is required with afterOffset or timeoutMs".into());
+    }
+    let deadline = Instant::now() + Duration::from_millis(timeout);
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return Err("request cancelled".into());
+        }
+        let state = manager.state(db, id)?;
+        let mut result = db.read_output(
+            id,
+            after_seq,
+            after_offset,
+            args["limit"].as_i64().unwrap_or(400),
+            args["maxChars"].as_u64().unwrap_or(16000) as usize,
+        )?;
+        let timed_out = Instant::now() >= deadline;
+        result["active"] = state["active"].clone();
+        result["timedOut"] = json!(timed_out && timeout > 0 && result["text"].as_str() == Some(""));
+        if result["text"].as_str() != Some("") || state["active"] == false || timed_out {
+            return Ok(result);
+        }
+        thread::sleep(
+            Duration::from_millis(25).min(deadline.saturating_duration_since(Instant::now())),
+        );
     }
 }
 
-fn required_string<'a>(params: &'a Value, field: &str) -> Result<&'a str, &'static str> {
-    params
-        .get(field)
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or("required string argument is missing")
+fn tool_success(value: Value) -> Value {
+    json!({"content":[{"type":"text","text":value.to_string()}],"structuredContent":value,"isError":false})
 }
 
-fn tool_error(message: &str) -> Value {
-    json!({"isError":true,"content":[{"type":"text","text":message}]})
-}
-
-fn respond_error(stream: &mut TcpStream, status: u16, message: &str) {
-    respond_json(stream, status, json!({"error":message}));
-}
-
-fn respond_json_rpc_error(
-    stream: &mut TcpStream,
-    status: u16,
-    id: Value,
-    code: i64,
-    message: &str,
-) {
-    respond_json(
-        stream,
-        status,
-        json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}}),
-    );
-}
-
-fn respond_json(stream: &mut TcpStream, status: u16, value: Value) {
-    let body = value.to_string();
-    let reason = match status {
-        200 => "OK",
-        202 => "Accepted",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        404 => "Not Found",
-        411 => "Length Required",
-        413 => "Payload Too Large",
-        431 => "Request Header Fields Too Large",
-        503 => "Service Unavailable",
-        _ => "Error",
-    };
-    let _ = write!(
-        stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
+fn tool_error(code: &str, message: &str) -> Value {
+    let error = json!({"error":{"code":code,"message":message}});
+    json!({"isError":true,"content":[{"type":"text","text":error.to_string()}],"structuredContent":error})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::TcpListener;
+    use transport::{parse_content_length, read_request};
+
+    fn invoke(db: &DataStore, manager: &SessionManager, name: &str, args: Value) -> Value {
+        call_tool_with(
+            db,
+            manager,
+            &json!({"name":name,"arguments":args}),
+            &AtomicBool::new(false),
+            |_| unreachable!(),
+        )
+        .unwrap()
+    }
 
     #[test]
-    fn schemas_include_required_tool_arguments() {
+    fn tools_expose_typed_results_and_no_screen_emulator() {
         let schemas = tools();
-        assert_eq!(schemas.len(), 10);
-        let create = schemas
+        assert_eq!(schemas.len(), 9);
+        assert!(!schemas.iter().any(|tool| tool["name"] == "shellink_screen"));
+        let read = schemas
             .iter()
-            .find(|tool| tool["name"] == "shellink_create_session")
+            .find(|tool| tool["name"] == "shellink_read_output")
             .unwrap();
-        assert_eq!(create["inputSchema"]["required"][0], "profileId");
+        assert_eq!(read["annotations"]["readOnlyHint"], true);
+        assert_eq!(read["inputSchema"]["properties"]["limit"]["default"], 400);
+        assert_eq!(read["outputSchema"]["type"], "object");
         let input = schemas
             .iter()
             .find(|tool| tool["name"] == "shellink_send_input")
             .unwrap();
         assert_eq!(input["inputSchema"]["required"], json!(["id", "text"]));
+        assert_eq!(
+            input["inputSchema"]["properties"]["appendNewline"]["default"],
+            true
+        );
+    }
+
+    #[test]
+    fn structured_errors_and_ai_mode_switching() {
+        let db = DataStore::test_store(PathBuf::new());
+        let manager = SessionManager::new();
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "MANUAL")
+            .unwrap();
+        let manual = invoke(
+            &db,
+            &manager,
+            "shellink_send_input",
+            json!({"id":"s","text":"pwd"}),
+        );
+        assert_eq!(manual["structuredContent"]["error"]["code"], "MANUAL_MODE");
+        let switched = invoke(
+            &db,
+            &manager,
+            "shellink_set_mode",
+            json!({"id":"s","mode":"AUTO"}),
+        );
+        assert_eq!(switched["structuredContent"]["mode"], "AUTO");
+        assert_eq!(db.session_mode("s").unwrap(), "AUTO");
+        let invalid = invoke(
+            &db,
+            &manager,
+            "shellink_read_output",
+            json!({"id":"s","limit":"400"}),
+        );
+        assert_eq!(
+            invalid["structuredContent"]["error"]["code"],
+            "INVALID_ARGUMENT"
+        );
+        let missing = invoke(
+            &db,
+            &manager,
+            "shellink_session_state",
+            json!({"id":"missing"}),
+        );
+        assert_eq!(
+            missing["structuredContent"]["error"]["code"],
+            "SESSION_NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn incremental_read_waits_for_output_and_times_out() {
+        let db = Arc::new(DataStore::test_store(PathBuf::new()));
+        let manager = SessionManager::new();
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        let output_db = db.clone();
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(40));
+            output_db.add_output("s", "ready\n").unwrap();
+        });
+        let result = invoke(
+            &db,
+            &manager,
+            "shellink_read_output",
+            json!({"id":"s","afterSeq":0,"timeoutMs":1000}),
+        );
+        writer.join().unwrap();
+        assert_eq!(result["structuredContent"]["text"], "ready\n");
+        let seq = result["structuredContent"]["nextSeq"].clone();
+        let empty = invoke(
+            &db,
+            &manager,
+            "shellink_read_output",
+            json!({"id":"s","afterSeq":seq,"timeoutMs":20}),
+        );
+        assert_eq!(empty["structuredContent"]["text"], "");
+        assert_eq!(empty["structuredContent"]["timedOut"], true);
+        let cancelled = call_tool_with(
+            &db,
+            &manager,
+            &json!({"name":"shellink_read_output","arguments":{"id":"s","afterSeq":0}}),
+            &AtomicBool::new(true),
+            |_| unreachable!(),
+        )
+        .unwrap();
+        assert_eq!(cancelled["structuredContent"]["error"]["code"], "CANCELLED");
     }
 
     #[test]
@@ -783,7 +748,6 @@ mod tests {
         let request = read_request(&mut stream).unwrap();
         client.join().unwrap();
         assert_eq!(request.body, body);
-        assert_eq!(request.path, "/shellink/mcp");
     }
 
     #[test]
@@ -799,59 +763,40 @@ mod tests {
     }
 
     #[test]
-    fn read_output_schema_documents_default_limit() {
-        let schemas = tools();
-        let read = schemas
-            .iter()
-            .find(|tool| tool["name"] == "shellink_read_output")
-            .unwrap();
-        assert!(read["description"].as_str().unwrap().contains("default 400"));
-        assert!(read["inputSchema"]["properties"]["limit"]["description"]
-            .as_str()
-            .unwrap()
-            .contains("default 400"));
-    }
-
-    #[test]
-    fn strips_ansi_escapes_from_output_text() {
-        let text = strip_ansi("\x1b]0;root@host:~\x07prompt> \x1b[1;32mok\x1b[0m\n");
-        assert_eq!(text, "prompt> ok\n");
-
-        let text = strip_ansi("\x1b[7;32m==>running...\x1b[0m\x1b[18;106H");
-        assert_eq!(text, "==>running...");
-
-        let text = strip_ansi("\x1b]0;GateShell\x1b\\x\x1b(B\x1b[?25l\x1b[?1049h");
-        assert_eq!(text, "x");
-    }
-    #[test]
-    fn handles_ping_and_json_rpc_errors() {
+    fn negotiates_versions_and_handles_json_rpc_errors() {
+        for (requested, internal, expected) in [
+            ("2025-03-26", false, "2025-03-26"),
+            ("2024-11-05", true, "2024-11-05"),
+            ("2024-11-05", false, "2025-06-18"),
+            ("2099-01-01", false, "2025-06-18"),
+        ] {
+            let response = process_request_with(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":requested}}), internal, |_,_| unreachable!()).unwrap().unwrap();
+            assert_eq!(response["result"]["protocolVersion"], expected);
+        }
         let ping = process_request_with(
             json!({"jsonrpc":"2.0","id":"p1","method":"ping"}),
+            false,
             |_, _| unreachable!(),
         )
         .unwrap()
         .unwrap();
         assert_eq!(ping["result"], json!({}));
-
         let error = process_request_with(
             json!({"jsonrpc":"2.0","id":7,"method":"no/such/method"}),
+            false,
             |_, _| unreachable!(),
         )
         .unwrap_err();
-        assert_eq!(
-            error,
-            (json!(7), -32601, "method not found: no/such/method".into())
+        assert_eq!(error.1, -32601);
+        assert!(
+            process_request_with(
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                false,
+                |_, _| unreachable!()
+            )
+            .unwrap()
+            .is_none()
         );
-    }
-
-    #[test]
-    fn accepts_initialized_notification_without_a_response() {
-        let response = process_request_with(
-            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-            |_, _| unreachable!(),
-        )
-        .unwrap();
-        assert!(response.is_none());
     }
 
     #[test]

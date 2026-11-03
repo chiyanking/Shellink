@@ -34,6 +34,17 @@ pub struct LaunchProfile {
 }
 
 impl DataStore {
+    #[cfg(test)]
+    pub(crate) fn test_store(data_home: PathBuf) -> Self {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_schema(&conn).unwrap();
+        Self {
+            conn: Mutex::new(conn),
+            key: [0; 32],
+            data_home,
+        }
+    }
+
     pub fn open() -> Result<Self, String> {
         let data_home = resolve_data_home()?;
         ensure_private_dir(&data_home)?;
@@ -171,12 +182,18 @@ impl DataStore {
     }
     pub fn session_state(&self, id: &str) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
-        c.query_row("SELECT id,state,mode,closed_at,close_reason,exit_code,(SELECT COALESCE(MAX(seq),0) FROM history_chunks WHERE session_id=sessions.id),(SELECT COALESCE(group_concat(data_plain,''),'') FROM (SELECT data_plain FROM history_chunks WHERE session_id=sessions.id AND direction='output' ORDER BY seq DESC LIMIT 15)) FROM sessions WHERE id=?", [id], |r| {
+        c.query_row("SELECT id,state,mode,closed_at,close_reason,exit_code,(SELECT COALESCE(MAX(seq),0) FROM history_chunks WHERE session_id=sessions.id),(SELECT COALESCE(group_concat(data_plain,''),'') FROM (SELECT data_plain FROM (SELECT seq,data_plain FROM history_chunks WHERE session_id=sessions.id AND direction='output' ORDER BY seq DESC LIMIT 15) ORDER BY seq)) FROM sessions WHERE id=?", [id], |r| {
             let recent: String = r.get(7)?;
+            let recent: String = recent.chars().rev().take(16_000).collect::<Vec<_>>().into_iter().rev().collect();
             Ok(json!({"id":r.get::<_,String>(0)?,"state":r.get::<_,String>(1)?,"mode":r.get::<_,String>(2)?,"closedAt":r.get::<_,Option<i64>>(3)?,"closeReason":r.get::<_,Option<String>>(4)?,"exitCode":r.get::<_,Option<i64>>(5)?,"active":r.get::<_,String>(1)? != "DISCONNECTED","lastSeq":r.get::<_,i64>(6)?,"recentOutput":recent}))
         }).optional().map_err(|e|e.to_string())?.ok_or_else(||"Session not found".into())
     }
+    #[cfg(test)]
     pub fn add_output(&self, id: &str, text: &str) -> Result<i64, String> {
+        self.add_output_plain(id, text, &crate::ansi::strip_ansi(text))
+    }
+
+    pub fn add_output_plain(&self, id: &str, text: &str, plain: &str) -> Result<i64, String> {
         let c = self.conn.lock().unwrap();
         let seq: i64 = c
             .query_row(
@@ -185,19 +202,21 @@ impl DataStore {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,crate::ansi::strip_ansi(text),0,now()]).map_err(|e|e.to_string())?;
-        c.execute("UPDATE sessions SET state='OUTPUTTING' WHERE id=? AND state!='DISCONNECTED'", [id]).map_err(|e| e.to_string())?;
+        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,plain,0,now()]).map_err(|e|e.to_string())?;
+        c.execute(
+            "UPDATE sessions SET state='OUTPUTTING' WHERE id=? AND state!='DISCONNECTED'",
+            [id],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(seq)
     }
     /// MCP 开关与 token，存于 settings 表（历史上在 mcp.json，启动时迁移）。
     pub fn mcp_state(&self) -> Result<Value, String> {
         let raw: Option<String> = {
             let c = self.conn.lock().unwrap();
-            c.query_row(
-                "SELECT value FROM settings WHERE key='mcp'",
-                [],
-                |r| r.get(0),
-            )
+            c.query_row("SELECT value FROM settings WHERE key='mcp'", [], |r| {
+                r.get(0)
+            })
             .optional()
             .map_err(|e| e.to_string())?
         };
@@ -249,6 +268,16 @@ impl DataStore {
         let command = std::env::current_exe()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let mut stdio_env = json!({"SHELLINK_HOME":self.data_home.to_string_lossy()});
+        if let Some(path) = self
+            .conn
+            .lock()
+            .unwrap()
+            .path()
+            .filter(|path| !path.is_empty())
+        {
+            stdio_env["SHELLINK_DB"] = json!(path);
+        }
         Ok(json!({
             "enabled":enabled,
             "running":false,
@@ -258,8 +287,9 @@ impl DataStore {
             "token":token,
             "command":command,
             "args":["mcp"],
+            "stdioEnv":stdio_env,
             "clientConfig":{"mcpServers":{"shellink":{"url":url,"headers":{"Authorization":format!("Bearer {}",token)}}}},
-            "clientConfigStdio":{"mcpServers":{"shellink":{"command":command,"args":["mcp"]}}}
+            "clientConfigStdio":{"mcpServers":{"shellink":{"command":command,"args":["mcp"],"env":stdio_env}}}
         }))
     }
     pub fn mcp_config(&self, params: &Value) -> Result<Value, String> {
@@ -287,7 +317,7 @@ impl DataStore {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"input",text,crate::ansi::strip_ansi(text),0,now()]).map_err(|e|e.to_string()).map(|_|())
+        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"input",text,crate::ansi::AnsiStripper::default().feed(text),0,now()]).map_err(|e|e.to_string()).map(|_|())
     }
     pub fn history_chunks(&self, id: &str, since: i64, limit: i64) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
@@ -313,38 +343,92 @@ impl DataStore {
         }
         Ok(json!({"items":items,"cursor":cursor,"hasMore":items.len() as i64==limit}))
     }
-    /// 最近 limit 个块（尾部优先），items 仍按 seq 升序返回。
-    /// hasMore=true 表示历史里还有更早的块未被包含。
-    pub fn history_chunks_recent(&self, id: &str, limit: i64) -> Result<Value, String> {
+    /// Character offsets let callers resume inside a large output chunk without loss.
+    /// With offset=0, after_seq is exclusive; with offset>0 it resumes that same seq.
+    pub fn read_output(
+        &self,
+        id: &str,
+        after_seq: Option<i64>,
+        after_offset: usize,
+        limit: i64,
+        max_chars: usize,
+    ) -> Result<Value, String> {
+        if after_seq.is_some_and(|seq| seq < 0)
+            || !(1..=10_000).contains(&limit)
+            || !(1..=65_536).contains(&max_chars)
+            || after_seq.is_none() && after_offset > 0
+        {
+            return Err("invalid output cursor or limit".into());
+        }
         let c = self.conn.lock().unwrap();
-        let exists: bool = c
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)",
-                [id],
-                |r| r.get(0),
-            )
+        let last_seq: i64 = c.query_row(
+            "SELECT COALESCE((SELECT MAX(seq) FROM history_chunks WHERE session_id=sessions.id),0) FROM sessions WHERE id=?",
+            [id], |row| row.get(0),
+        ).optional().map_err(|e| e.to_string())?.ok_or("Session not found")?;
+        let start = match after_seq {
+            Some(seq) => seq,
+            None => c.query_row(
+                "SELECT COALESCE(MIN(seq),1)-1 FROM (SELECT seq FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 ORDER BY seq DESC LIMIT ?)",
+                rusqlite::params![id, limit], |row| row.get::<_, i64>(0),
+            ).map_err(|e| e.to_string())?,
+        };
+        let has_earlier: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 AND seq<=?)",
+            rusqlite::params![id, start], |row| row.get(0),
+        ).map_err(|e| e.to_string())?;
+        let mut statement = c.prepare(
+            "SELECT seq,data_plain FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 AND (seq>? OR (seq=? AND ?>0)) ORDER BY seq LIMIT ?",
+        ).map_err(|e| e.to_string())?;
+        let mut rows = statement
+            .query(rusqlite::params![
+                id,
+                start,
+                start,
+                after_offset as i64,
+                limit + 1
+            ])
             .map_err(|e| e.to_string())?;
-        if !exists {
-            return Err("Session not found".into());
+        let mut text = String::new();
+        let mut remaining = max_chars;
+        let mut next_seq = start;
+        let mut next_offset = after_offset;
+        let mut count = 0;
+        let mut has_more = false;
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            if count >= limit || remaining == 0 {
+                has_more = true;
+                break;
+            }
+            let seq: i64 = row.get(0).map_err(|e| e.to_string())?;
+            let chunk: String = row.get(1).map_err(|e| e.to_string())?;
+            let offset = if seq == start { after_offset } else { 0 };
+            let mut chars = chunk.chars().skip(offset).peekable();
+            let mut consumed = 0;
+            while remaining > 0 {
+                let Some(ch) = chars.next() else { break };
+                text.push(ch);
+                consumed += 1;
+                remaining -= 1;
+            }
+            next_seq = seq;
+            next_offset = if chars.peek().is_some() {
+                offset + consumed
+            } else {
+                0
+            };
+            count += 1;
+            if next_offset > 0 {
+                has_more = true;
+                break;
+            }
         }
-        let limit = limit.clamp(1, 10_000);
-        let mut s=c.prepare("SELECT id,session_id,seq,direction,data_plain,created_at FROM history_chunks WHERE session_id=? AND internal=0 ORDER BY seq DESC LIMIT ?").map_err(|e|e.to_string())?;
-        let rows=s.query_map(rusqlite::params![id,limit],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"sessionId":r.get::<_,String>(1)?,"seq":r.get::<_,i64>(2)?,"direction":r.get::<_,String>(3)?,"plain":r.get::<_,String>(4)?,"createdAt":r.get::<_,i64>(5)?}))).map_err(|e|e.to_string())?;
-        let mut items = Vec::new();
-        for row in rows {
-            items.push(row.map_err(|e| e.to_string())?);
+        if !has_more {
+            next_seq = last_seq.max(next_seq);
+            next_offset = 0;
         }
-        items.reverse();
-        let first_seq = items.first().and_then(|v| v.get("seq")).and_then(Value::as_i64);
-        let has_more = first_seq.is_some_and(|seq| {
-            c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM history_chunks WHERE session_id=? AND seq<? AND internal=0)",
-                rusqlite::params![id, seq],
-                |r| r.get(0),
-            )
-            .unwrap_or(false)
-        });
-        Ok(json!({"items":items,"cursor":items.last().and_then(|v|v.get("seq")).cloned().unwrap_or(json!(0)),"hasMore":has_more}))
+        Ok(
+            json!({"text":text,"nextSeq":next_seq,"nextOffset":next_offset,"hasMore":has_more,"hasEarlier":has_earlier && after_seq.is_none()}),
+        )
     }
     pub fn update_session_mode(&self, id: &str, mode: &str) -> Result<Value, String> {
         if mode != "AUTO" && mode != "MANUAL" {
@@ -418,14 +502,20 @@ impl DataStore {
     pub fn replay(&self, id: &str) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
         let exists: bool = c
-            .query_row("SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)", [id], |r| r.get(0))
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)",
+                [id],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())?;
         if !exists {
             return Err("Session not found".into());
         }
         let mut statement = c.prepare("SELECT data_raw,seq FROM history_chunks WHERE session_id=? AND direction='output' ORDER BY seq").map_err(|e| e.to_string())?;
         let rows = statement
-            .query_map([id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .query_map([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
             .map_err(|e| e.to_string())?;
         let mut raw = String::new();
         let mut cursor = 0;
@@ -435,33 +525,6 @@ impl DataStore {
             cursor = seq;
         }
         Ok(json!({"raw":raw,"cursor":cursor}))
-    }
-    /// 当前可见屏幕：把全部原始输出重放进 VT 模拟器后的画面。
-    pub fn screen(&self, id: &str) -> Result<Value, String> {
-        let c = self.conn.lock().unwrap();
-        let (cols, rows): (i64, i64) = c
-            .query_row("SELECT cols,rows FROM sessions WHERE id=?", [id], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .optional()
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Session not found".to_string())?;
-        let mut statement = c.prepare("SELECT data_raw FROM history_chunks WHERE session_id=? AND direction='output' ORDER BY seq").map_err(|e| e.to_string())?;
-        let rows_iter = statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?;
-        let mut screen = crate::screen::ScreenEmulator::new(
-            (cols.max(1) as usize).min(1000),
-            (rows.max(1) as usize).min(500),
-        );
-        for row in rows_iter {
-            screen.feed(&row.map_err(|e| e.to_string())?);
-        }
-        Ok(json!({
-            "screen": screen.snapshot(),
-            "cols": cols,
-            "rows": rows,
-        }))
     }
     pub fn webhooks(&self) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
@@ -559,7 +622,8 @@ impl DataStore {
     pub fn profile_delete(&self, id: &str) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
         if c.execute("DELETE FROM profiles WHERE id=?", [id])
-            .map_err(|e| e.to_string())? == 0
+            .map_err(|e| e.to_string())?
+            == 0
         {
             return Err("Profile not found".into());
         }
@@ -885,6 +949,61 @@ fn decrypt(key: &[u8; 32], encoded: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn recent_output_is_chronological_and_bounded() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        for chunk in ["first\n", "second\n", "third\n"] {
+            db.add_output("s", chunk).unwrap();
+        }
+        assert_eq!(
+            db.session_state("s").unwrap()["recentOutput"],
+            "first\nsecond\nthird\n"
+        );
+        db.add_output("s", &"中".repeat(20_000)).unwrap();
+        assert_eq!(
+            db.session_state("s").unwrap()["recentOutput"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            16_000
+        );
+    }
+
+    #[test]
+    fn output_cursor_resumes_unicode_chunks_without_loss_or_duplicate_input() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        db.add_output("s", "ab中文cd").unwrap();
+        db.add_input("s", "secret input").unwrap();
+        db.add_output("s", "efgh").unwrap();
+        let mut seq = 0;
+        let mut offset = 0;
+        let mut combined = String::new();
+        loop {
+            let page = db.read_output("s", Some(seq), offset, 1, 3).unwrap();
+            combined.push_str(page["text"].as_str().unwrap());
+            seq = page["nextSeq"].as_i64().unwrap();
+            offset = page["nextOffset"].as_u64().unwrap() as usize;
+            if page["hasMore"] == false {
+                break;
+            }
+        }
+        assert_eq!(combined, "ab中文cdefgh");
+        assert_eq!((seq, offset), (3, 0));
+        assert_eq!(
+            db.read_output("s", Some(seq), offset, 400, 100).unwrap()["text"],
+            ""
+        );
+        let recent = db.read_output("s", None, 0, 1, 100).unwrap();
+        assert_eq!(recent["text"], "efgh");
+        assert_eq!(recent["hasEarlier"], true);
+        assert!(db.read_output("missing", Some(0), 0, 400, 100).is_err());
+    }
+
     fn test_dir(label: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "shellink-{label}-{}-{}",
@@ -896,40 +1015,27 @@ mod tests {
     }
 
     #[test]
-    fn history_chunks_recent_returns_latest_blocks_in_ascending_order() {
-        let conn = Connection::open_in_memory().unwrap();
-        initialize_schema(&conn).unwrap();
-        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
-        db.insert_session("test", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
-        for i in 1..=10 {
-            db.add_output("test", &format!("chunk-{i} ")).unwrap();
-        }
-        // 最近 3 块: seq 8,9,10 — 返回仍按 seq 升序
-        let recent = db.history_chunks_recent("test", 3).unwrap();
-        let seqs: Vec<i64> = recent["items"].as_array().unwrap()
-            .iter().map(|i| i["seq"].as_i64().unwrap()).collect();
-        assert_eq!(seqs, vec![8, 9, 10]);
-        let text: String = recent["items"].as_array().unwrap()
-            .iter().filter_map(|i| i["plain"].as_str()).collect();
-        assert_eq!(text, "chunk-8 chunk-9 chunk-10 ");
-        assert_eq!(recent["hasMore"], json!(true));
-        // 最近 3 块但总共不足 3: 全部返回, hasMore=false
-        let all = db.history_chunks_recent("test", 20).unwrap();
-        assert_eq!(all["items"].as_array().unwrap().len(), 10);
-        assert_eq!(all["hasMore"], json!(false));
-    }
-
-    #[test]
     fn replay_cursor_tracks_output_sequence_with_interleaved_input() {
         let conn = Connection::open_in_memory().unwrap();
         initialize_schema(&conn).unwrap();
-        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
-        db.insert_session("test", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
+        let db = DataStore {
+            conn: Mutex::new(conn),
+            key: [0; 32],
+            data_home: PathBuf::new(),
+        };
+        db.insert_session(
+            "test", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL",
+        )
+        .unwrap();
         assert_eq!(db.add_output("test", "prompt> ").unwrap(), 1);
         db.add_input("test", "pwd\n").unwrap();
         assert_eq!(db.add_output("test", "/tmp\n").unwrap(), 3);
-        assert_eq!(db.replay("test").unwrap(), json!({"raw":"prompt> /tmp\n", "cursor":3}));
-        db.update_session_state("test", "DISCONNECTED", Some("Process exited")).unwrap();
+        assert_eq!(
+            db.replay("test").unwrap(),
+            json!({"raw":"prompt> /tmp\n", "cursor":3})
+        );
+        db.update_session_state("test", "DISCONNECTED", Some("Process exited"))
+            .unwrap();
         db.add_output("test", "final output").unwrap();
         assert_eq!(db.session_state("test").unwrap()["active"], false);
     }
@@ -938,17 +1044,34 @@ mod tests {
     fn reconcile_marks_orphaned_active_sessions_as_disconnected() {
         let conn = Connection::open_in_memory().unwrap();
         initialize_schema(&conn).unwrap();
-        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
+        let db = DataStore {
+            conn: Mutex::new(conn),
+            key: [0; 32],
+            data_home: PathBuf::new(),
+        };
         // 上次运行遗留的"活跃"会话 (进程被强杀时 shutdown 未执行)
-        db.insert_session("stale-1", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
-        db.insert_session("stale-2", "profile", "Profile", "local", 120, 36, "", "test", "AUTO").unwrap();
-        db.update_session_state("stale-2", "OUTPUTTING", None).unwrap();
+        db.insert_session(
+            "stale-1", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL",
+        )
+        .unwrap();
+        db.insert_session(
+            "stale-2", "profile", "Profile", "local", 120, 36, "", "test", "AUTO",
+        )
+        .unwrap();
+        db.update_session_state("stale-2", "OUTPUTTING", None)
+            .unwrap();
         db.reconcile_stale_sessions().unwrap();
         assert_eq!(db.session_state("stale-1").unwrap()["active"], false);
         assert_eq!(db.session_state("stale-2").unwrap()["active"], false);
-        assert_eq!(db.session_state("stale-1").unwrap()["closeReason"], "App exited without cleanup");
+        assert_eq!(
+            db.session_state("stale-1").unwrap()["closeReason"],
+            "App exited without cleanup"
+        );
         // 本次运行的真实会话 (reconcile 之后创建), 不应被影响
-        db.insert_session("live-1", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL").unwrap();
+        db.insert_session(
+            "live-1", "profile", "Profile", "local", 120, 36, "", "test", "MANUAL",
+        )
+        .unwrap();
         assert_eq!(db.session_state("live-1").unwrap()["active"], true);
         // 幂等: 重复调用不覆盖已有 closed_at / close_reason
         db.reconcile_stale_sessions().unwrap();
@@ -1024,18 +1147,33 @@ mod tests {
     fn mcp_state_persists_in_settings_table_and_migrates_mcp_json() {
         let conn = Connection::open_in_memory().unwrap();
         initialize_schema(&conn).unwrap();
-        let db = DataStore { conn: Mutex::new(conn), key: [0; 32], data_home: PathBuf::new() };
+        let db = DataStore {
+            conn: Mutex::new(conn),
+            key: [0; 32],
+            data_home: PathBuf::new(),
+        };
         // 默认值: enabled=true, token 为空
-        assert_eq!(db.mcp_state().unwrap(), json!({"enabled": true, "token": ""}));
+        assert_eq!(
+            db.mcp_state().unwrap(),
+            json!({"enabled": true, "token": ""})
+        );
         // 配置写入 settings 表
-        let info = db.mcp_config(&json!({"enabled": false, "regenerateToken": true})).unwrap();
+        let info = db
+            .mcp_config(&json!({"enabled": false, "regenerateToken": true}))
+            .unwrap();
         assert_eq!(info["enabled"], json!(false));
         assert_ne!(info["token"], json!(""));
-        assert_eq!(db.mcp_state().unwrap(), json!({"enabled": false, "token": info["token"]}));
+        assert_eq!(
+            db.mcp_state().unwrap(),
+            json!({"enabled": false, "token": info["token"]})
+        );
         // 空token首次读取时自动生成并持久化
         let first = db.mcp_info().unwrap();
         assert_ne!(first["token"], json!(""));
-        assert_eq!(db.mcp_state().unwrap(), json!({"enabled": false, "token": first["token"]}));
+        assert_eq!(
+            db.mcp_state().unwrap(),
+            json!({"enabled": false, "token": first["token"]})
+        );
     }
 
     #[test]
@@ -1047,11 +1185,9 @@ mod tests {
         fs::write(home.join("mcp.json"), serde_json::to_vec(&legacy).unwrap()).unwrap();
         migrate_legacy_mcp_json(&conn, &home).unwrap();
         let stored: String = conn
-            .query_row(
-                "SELECT value FROM settings WHERE key='mcp'",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT value FROM settings WHERE key='mcp'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), legacy);
         assert!(!home.join("mcp.json").exists());
@@ -1063,7 +1199,9 @@ mod tests {
         .unwrap();
         migrate_legacy_mcp_json(&conn, &home).unwrap();
         let stored: String = conn
-            .query_row("SELECT value FROM settings WHERE key='mcp'", [], |r| r.get(0))
+            .query_row("SELECT value FROM settings WHERE key='mcp'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(
             serde_json::from_str::<Value>(&stored).unwrap(),

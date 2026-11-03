@@ -1,66 +1,101 @@
 //! Shared terminal-text helpers for history storage, MCP tools, and events.
 
-/// Remove ANSI escape sequences (CSI, OSC, charset selection, two-char escapes)
-/// from raw PTY output.
-pub fn strip_ansi(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\x1b' {
-            out.push(c);
-            continue;
+/// ANSI removal for a log stream. Parser state survives PTY read boundaries;
+/// no screen grid, cursor emulation, or terminal rendering is performed.
+#[derive(Default)]
+pub struct AnsiStripper {
+    state: State,
+}
+
+#[derive(Default)]
+enum State {
+    #[default]
+    Ground,
+    Escape,
+    Intermediate,
+    Csi,
+    Osc,
+    OscEscape,
+    String,
+    StringEscape,
+}
+
+impl AnsiStripper {
+    pub fn feed(&mut self, text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        for ch in text.chars() {
+            self.state = match self.state {
+                State::Ground => match ch {
+                    '\x1b' => State::Escape,
+                    '\u{9b}' => State::Csi,
+                    '\u{9d}' => State::Osc,
+                    _ => {
+                        out.push(ch);
+                        State::Ground
+                    }
+                },
+                State::Escape => match ch {
+                    '[' => State::Csi,
+                    ']' => State::Osc,
+                    'P' | 'X' | '^' | '_' => State::String,
+                    '\x1b' => State::Escape,
+                    '\u{20}'..='\u{2f}' => State::Intermediate,
+                    _ => State::Ground,
+                },
+                State::Intermediate => match ch {
+                    '\x1b' => State::Escape,
+                    '\u{20}'..='\u{2f}' => State::Intermediate,
+                    _ => State::Ground,
+                },
+                State::Csi => match ch {
+                    '\x1b' => State::Escape,
+                    '\u{40}'..='\u{7e}' => State::Ground,
+                    _ => State::Csi,
+                },
+                State::Osc => match ch {
+                    '\x07' | '\u{9c}' => State::Ground,
+                    '\x1b' => State::OscEscape,
+                    _ => State::Osc,
+                },
+                State::OscEscape => match ch {
+                    '\\' | '\x07' | '\u{9c}' => State::Ground,
+                    '\x1b' => State::OscEscape,
+                    _ => State::Osc,
+                },
+                State::String => match ch {
+                    '\u{9c}' => State::Ground,
+                    '\x1b' => State::StringEscape,
+                    _ => State::String,
+                },
+                State::StringEscape => match ch {
+                    '\\' | '\u{9c}' => State::Ground,
+                    '\x1b' => State::StringEscape,
+                    _ => State::String,
+                },
+            };
         }
-        match chars.peek() {
-            Some('[') => {
-                chars.next();
-                // CSI: parameters+intermediates until final byte 0x40-0x7E
-                while let Some(&c) = chars.peek() {
-                    chars.next();
-                    if ('\u{40}'..='\u{7e}').contains(&c) {
-                        break;
-                    }
-                    if !('\u{20}'..='\u{3f}').contains(&c) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                chars.next();
-                // OSC: terminated by BEL or ST (ESC \)
-                while let Some(c) = chars.next() {
-                    if c == '\x07' {
-                        break;
-                    }
-                    if c == '\x1b' && chars.peek() == Some(&'\\') {
-                        chars.next();
-                        break;
-                    }
-                }
-            }
-            Some(c) if ('\u{20}'..='\u{2f}').contains(c) => {
-                // ESC with intermediates (e.g. charset selection ESC ( B):
-                // consume intermediates then the final byte
-                while let Some(&c) = chars.peek() {
-                    if !('\u{20}'..='\u{2f}').contains(&c) {
-                        break;
-                    }
-                    chars.next();
-                }
-                chars.next();
-            }
-            Some(_) => {
-                // Two-char escapes (keypad modes, index, etc.)
-                chars.next();
-            }
-            None => {}
-        }
+        out
     }
-    out
+}
+
+#[cfg(test)]
+pub fn strip_ansi(text: &str) -> String {
+    AnsiStripper::default().feed(text)
 }
 
 #[cfg(test)]
 mod tests {
     use super::strip_ansi;
+
+    #[test]
+    fn streaming_ansi_removal_survives_chunk_boundaries() {
+        let text = "before\x1b[31mred\x1b[0m\x1b]0;title\x1b\\after\x1bPignored\x1b\\!";
+        for boundary in 0..=text.len() {
+            let mut parser = super::AnsiStripper::default();
+            let output = parser.feed(&text[..boundary]) + &parser.feed(&text[boundary..]);
+            assert_eq!(output, "beforeredafter!", "boundary {boundary}");
+        }
+    }
 
     #[test]
     fn strips_ansi_escapes() {
