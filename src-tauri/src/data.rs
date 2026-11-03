@@ -343,92 +343,48 @@ impl DataStore {
         }
         Ok(json!({"items":items,"cursor":cursor,"hasMore":items.len() as i64==limit}))
     }
-    /// Character offsets let callers resume inside a large output chunk without loss.
-    /// With offset=0, after_seq is exclusive; with offset>0 it resumes that same seq.
-    pub fn read_output(
-        &self,
-        id: &str,
-        after_seq: Option<i64>,
-        after_offset: usize,
-        limit: i64,
-        max_chars: usize,
-    ) -> Result<Value, String> {
-        if after_seq.is_some_and(|seq| seq < 0)
-            || !(1..=10_000).contains(&limit)
-            || !(1..=65_536).contains(&max_chars)
-            || after_seq.is_none() && after_offset > 0
-        {
-            return Err("invalid output cursor or limit".into());
+    /// Return the latest lines, including an unfinished final line such as a prompt.
+    pub fn read_output(&self, id: &str, limit: usize) -> Result<Value, String> {
+        if !(1..=10_000).contains(&limit) {
+            return Err("invalid output line limit".into());
         }
         let c = self.conn.lock().unwrap();
-        let last_seq: i64 = c.query_row(
-            "SELECT COALESCE((SELECT MAX(seq) FROM history_chunks WHERE session_id=sessions.id),0) FROM sessions WHERE id=?",
-            [id], |row| row.get(0),
-        ).optional().map_err(|e| e.to_string())?.ok_or("Session not found")?;
-        let start = match after_seq {
-            Some(seq) => seq,
-            None => c.query_row(
-                "SELECT COALESCE(MIN(seq),1)-1 FROM (SELECT seq FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 ORDER BY seq DESC LIMIT ?)",
-                rusqlite::params![id, limit], |row| row.get::<_, i64>(0),
-            ).map_err(|e| e.to_string())?,
-        };
-        let has_earlier: bool = c.query_row(
-            "SELECT EXISTS(SELECT 1 FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 AND seq<=?)",
-            rusqlite::params![id, start], |row| row.get(0),
-        ).map_err(|e| e.to_string())?;
-        let mut statement = c.prepare(
-            "SELECT seq,data_plain FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 AND (seq>? OR (seq=? AND ?>0)) ORDER BY seq LIMIT ?",
-        ).map_err(|e| e.to_string())?;
-        let mut rows = statement
-            .query(rusqlite::params![
-                id,
-                start,
-                start,
-                after_offset as i64,
-                limit + 1
-            ])
+        let exists: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)",
+                [id],
+                |row| row.get(0),
+            )
             .map_err(|e| e.to_string())?;
-        let mut text = String::new();
-        let mut remaining = max_chars;
-        let mut next_seq = start;
-        let mut next_offset = after_offset;
-        let mut count = 0;
-        let mut has_more = false;
+        if !exists {
+            return Err("Session not found".into());
+        }
+        let mut statement = c.prepare(
+            "SELECT data_plain FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 ORDER BY seq DESC",
+        ).map_err(|e| e.to_string())?;
+        let mut rows = statement.query([id]).map_err(|e| e.to_string())?;
+        let mut reversed = Vec::new();
+        let mut remaining = limit;
+        let mut has_earlier = false;
         while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-            if count >= limit || remaining == 0 {
-                has_more = true;
-                break;
+            let chunk: String = row.get(0).map_err(|e| e.to_string())?;
+            for ch in chunk.chars().rev() {
+                // A trailing newline terminates the final line without adding an empty one.
+                if ch == '\n' && !reversed.is_empty() {
+                    remaining -= 1;
+                    if remaining == 0 {
+                        has_earlier = true;
+                        break;
+                    }
+                }
+                reversed.push(ch);
             }
-            let seq: i64 = row.get(0).map_err(|e| e.to_string())?;
-            let chunk: String = row.get(1).map_err(|e| e.to_string())?;
-            let offset = if seq == start { after_offset } else { 0 };
-            let mut chars = chunk.chars().skip(offset).peekable();
-            let mut consumed = 0;
-            while remaining > 0 {
-                let Some(ch) = chars.next() else { break };
-                text.push(ch);
-                consumed += 1;
-                remaining -= 1;
-            }
-            next_seq = seq;
-            next_offset = if chars.peek().is_some() {
-                offset + consumed
-            } else {
-                0
-            };
-            count += 1;
-            if next_offset > 0 {
-                has_more = true;
+            if has_earlier {
                 break;
             }
         }
-        if !has_more {
-            next_seq = last_seq.max(next_seq);
-            next_offset = 0;
-        }
-        Ok(
-            json!({"text":text,"nextSeq":next_seq,"nextOffset":next_offset,"hasMore":has_more,"hasEarlier":has_earlier && after_seq.is_none()}),
-        )
+        let text: String = reversed.into_iter().rev().collect();
+        Ok(json!({"text":text,"hasEarlier":has_earlier}))
     }
     pub fn update_session_mode(&self, id: &str, mode: &str) -> Result<Value, String> {
         if mode != "AUTO" && mode != "MANUAL" {
@@ -973,35 +929,116 @@ mod tests {
     }
 
     #[test]
-    fn output_cursor_resumes_unicode_chunks_without_loss_or_duplicate_input() {
+    fn output_snapshots_keep_complete_recent_lines() {
         let db = DataStore::test_store(PathBuf::new());
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
             .unwrap();
-        db.add_output("s", "ab中文cd").unwrap();
+        db.add_output("s", "first\n").unwrap();
         db.add_input("s", "secret input").unwrap();
-        db.add_output("s", "efgh").unwrap();
-        let mut seq = 0;
-        let mut offset = 0;
-        let mut combined = String::new();
-        loop {
-            let page = db.read_output("s", Some(seq), offset, 1, 3).unwrap();
-            combined.push_str(page["text"].as_str().unwrap());
-            seq = page["nextSeq"].as_i64().unwrap();
-            offset = page["nextOffset"].as_u64().unwrap() as usize;
-            if page["hasMore"] == false {
-                break;
-            }
-        }
-        assert_eq!(combined, "ab中文cdefgh");
-        assert_eq!((seq, offset), (3, 0));
+        db.add_output("s", "second\n第三行\n").unwrap();
         assert_eq!(
-            db.read_output("s", Some(seq), offset, 400, 100).unwrap()["text"],
-            ""
+            db.read_output("s", 1).unwrap(),
+            json!({"text":"第三行\n","hasEarlier":true})
         );
-        let recent = db.read_output("s", None, 0, 1, 100).unwrap();
-        assert_eq!(recent["text"], "efgh");
-        assert_eq!(recent["hasEarlier"], true);
-        assert!(db.read_output("missing", Some(0), 0, 400, 100).is_err());
+        assert_eq!(
+            db.read_output("s", 2).unwrap(),
+            json!({"text":"second\n第三行\n","hasEarlier":true})
+        );
+        assert_eq!(
+            db.read_output("s", 3).unwrap(),
+            json!({"text":"first\nsecond\n第三行\n","hasEarlier":false})
+        );
+        let long_line = format!("{}最新结果\n", "中".repeat(70_000));
+        db.add_output("s", &long_line).unwrap();
+        assert_eq!(
+            db.read_output("s", 1).unwrap(),
+            json!({"text":long_line,"hasEarlier":true})
+        );
+    }
+
+    #[test]
+    fn output_snapshots_join_lines_across_chunks_and_keep_the_final_prompt() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        for chunk in [
+            "first\r",
+            "\nsec",
+            "ond\r\n",
+            "第三",
+            "行\r",
+            "\nprompt> ",
+            "",
+        ] {
+            db.add_output("s", chunk).unwrap();
+        }
+        assert_eq!(
+            db.read_output("s", 1).unwrap(),
+            json!({"text":"prompt> ","hasEarlier":true})
+        );
+        assert_eq!(
+            db.read_output("s", 2).unwrap(),
+            json!({"text":"第三行\r\nprompt> ","hasEarlier":true})
+        );
+        assert_eq!(
+            db.read_output("s", 4).unwrap(),
+            json!({"text":"first\r\nsecond\r\n第三行\r\nprompt> ","hasEarlier":false})
+        );
+    }
+
+    #[test]
+    fn output_snapshots_handle_blank_lines_and_do_not_limit_chunk_count() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        db.add_output("s", "\n\n").unwrap();
+        assert_eq!(
+            db.read_output("s", 1).unwrap(),
+            json!({"text":"\n","hasEarlier":true})
+        );
+        assert_eq!(
+            db.read_output("s", 2).unwrap(),
+            json!({"text":"\n\n","hasEarlier":false})
+        );
+        for _ in 0..500 {
+            db.add_output("s", "中").unwrap();
+        }
+        assert_eq!(
+            db.read_output("s", 1).unwrap(),
+            json!({"text":"中".repeat(500),"hasEarlier":true})
+        );
+    }
+
+    #[test]
+    fn output_snapshots_are_independent_and_exclude_other_sessions_and_internal_logs() {
+        let db = DataStore::test_store(PathBuf::new());
+        for id in ["s", "other", "empty"] {
+            db.insert_session(id, "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+                .unwrap();
+        }
+        db.add_output("s", "visible").unwrap();
+        db.add_output("other", "other output").unwrap();
+        let internal_seq = db.add_output("s", "internal output").unwrap();
+        db.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE history_chunks SET internal=1 WHERE session_id=? AND seq=?",
+                rusqlite::params!["s", internal_seq],
+            )
+            .unwrap();
+        let first_reader = db.read_output("s", 100).unwrap();
+        let second_reader = db.read_output("s", 100).unwrap();
+        assert_eq!(first_reader, json!({"text":"visible","hasEarlier":false}));
+        assert_eq!(second_reader, first_reader);
+        assert_eq!(
+            db.read_output("empty", 100).unwrap(),
+            json!({"text":"","hasEarlier":false})
+        );
+        assert!(db.read_output("missing", 100).is_err());
+        for limit in [0, 10_001] {
+            assert!(db.read_output("s", limit).is_err());
+        }
     }
 
     fn test_dir(label: &str) -> PathBuf {

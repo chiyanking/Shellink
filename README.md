@@ -47,7 +47,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-The MCP integration check runs a built Desktop executable with temporary data directories. It requires a macOS/Linux graphical desktop session and checks both HTTP enablement states, stdio, raw input, output cursors, mode switching, exit tracking, and token rotation:
+The MCP integration check runs a built Desktop executable with temporary data directories. It requires a macOS/Linux graphical desktop session and checks both HTTP enablement states, stdio, raw input, recent output snapshots, mode switching, exit tracking, and token rotation:
 
 ```sh
 cargo build --manifest-path src-tauri/Cargo.toml
@@ -68,17 +68,17 @@ MCP tools return both JSON text content and `structuredContent`, with output sch
 
 `shellink_send_input` appends a newline by default. Pass `appendNewline: false` to send raw keys such as `"\u0003"` (Ctrl-C), `"\t"`, or `"\u001b[A"` (Up). Sending empty text with `appendNewline: true` sends Enter. AUTO/MANUAL are collaboration modes: MANUAL rejects MCP input, and MCP can call `shellink_set_mode` to switch back to AUTO.
 
-`shellink_read_output` returns chronological plain-text logs, with these options:
+`shellink_read_output` returns a fresh snapshot of the latest plain-text logs, in chronological order. Only the session `id` is required:
+
+```json
+{"id":"session-id","limit":200}
+```
 
 | Argument | Behavior |
 | --- | --- |
-| `afterSeq` | Omit for recent output; use `0` to start from the beginning. |
-| `afterOffset` | Resume within a chunk, measured in Unicode characters; defaults to `0`. |
-| `limit` | Maximum output chunks per page, default `400`, maximum `10000`. |
-| `maxChars` | Maximum returned text characters, default `16000`, maximum `65536`. |
-| `timeoutMs` | With `afterSeq`, wait up to `30000` ms for new output or session exit. |
+| `limit` | Number of recent text lines, default `200`, maximum `10000`. Keep the newest lines, including an unfinished final line such as a shell prompt. |
 
-Continue with `afterSeq: nextSeq` and `afterOffset: nextOffset` from the preceding response. Both values are necessary when a large chunk spans pages. Responses include `text`, `hasMore`, `hasEarlier`, `active`, and `timedOut`. `hasEarlier` indicates that a recent-output request omitted older history; `hasMore` indicates unread output after this page. List results use the `profiles` or `sessions` array in their structured object.
+Responses include `text`, `hasEarlier`, and `active`. `hasEarlier` indicates that older lines were omitted by `limit`; increase it for more context. Lines are separated by LF (preserving CRLF), joined across PTY chunks, and kept intact without a character limit. A trailing newline ends the final line without adding an extra empty line; an unfinished final line counts toward `limit`. Each read returns immediately and does not consume output or save a reading position, so multiple AI clients can read the same session independently. Repeat reads to observe later output; unchanged output is returned again. This tool no longer accepts `maxChars`, `afterSeq`, `afterOffset`, or `timeoutMs`, or returns pagination cursors. `active` describes whether the session is alive, not whether an individual command has finished. List results use the `profiles` or `sessions` array in their structured object.
 
 The nine MCP tools cover profiles, session creation/state/output/input, input mode, and session close. The Tauri RPC surface also exposes profile editing, session history and replay, Webhook messages, and lifecycle status. A background reaper updates exit status and exit codes independently of UI polling.
 

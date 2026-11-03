@@ -80,24 +80,26 @@ def exercise(http_enabled):
                 tools = rpc("tools/list")["tools"]
                 assert len(tools) == 9 and not any(tool["name"] == "shellink_screen" for tool in tools)
                 assert all("annotations" in item and "outputSchema" in item for item in tools)
+                read_tool = next(item for item in tools if item["name"] == "shellink_read_output")
+                assert set(read_tool["inputSchema"]["properties"]) == {"id", "limit"}
                 profile = tool("create_profile", name="integration", connectType="command", command="exec /bin/sh")["structuredContent"]
                 session = tool("create_session", profileId=profile["id"])["structuredContent"]["id"]
                 # The typed command contains octal escapes, so PTY echo cannot fake the marker.
                 tool("send_input", id=session, text=r"printf '\115\103\120\137\122\101\127\137\117\113\n'", appendNewline=False)
                 time.sleep(0.1)
-                before = tool("read_output", id=session, afterSeq=0)["structuredContent"]
+                before = tool("read_output", id=session)["structuredContent"]
                 assert "MCP_RAW_OK" not in before["text"], before
                 tool("send_input", id=session, text="", appendNewline=True)
-                seq, offset = before["nextSeq"], before["nextOffset"]
-                combined = ""
-                output_deadline = time.monotonic() + 5
-                while time.monotonic() < output_deadline:
-                    page = tool("read_output", id=session, afterSeq=seq, afterOffset=offset, maxChars=5, timeoutMs=1000)["structuredContent"]
-                    combined += page["text"]
-                    seq, offset = page["nextSeq"], page["nextOffset"]
-                    if "MCP_RAW_OK" in combined:
-                        break
-                assert "MCP_RAW_OK" in combined, combined
+                def marker_output():
+                    snapshot = tool("read_output", id=session)["structuredContent"]
+                    return snapshot if "MCP_RAW_OK" in snapshot["text"] else None
+
+                latest = wait_until(marker_output)
+                assert set(latest) == {"text", "hasEarlier", "active"}, latest
+                assert "MCP_RAW_OK" in tool("read_output", id=session)["structuredContent"]["text"]
+                tail = tool("read_output", id=session, limit=1)["structuredContent"]
+                assert len(tail["text"].splitlines()) <= 1 and tail["hasEarlier"] is True, tail
+                assert "MCP_RAW_OK" in tool("read_output", id=session)["structuredContent"]["text"]
                 tool("set_mode", id=session, mode="MANUAL")
                 denied = tool("send_input", id=session, text="pwd")
                 assert denied["structuredContent"]["error"]["code"] == "MANUAL_MODE"
@@ -117,11 +119,11 @@ def exercise(http_enabled):
                     db.execute("UPDATE settings SET value=? WHERE key='mcp'", (json.dumps({"enabled": http_enabled, "token": token}),))
                 assert rpc("ping") == {}  # Same proxy process, no restart after rotation.
 
-                def request_http(method="POST", extra=None, chunked=False):
+                def request_http(method="POST", extra=None, chunked=False, rpc_request=None):
                     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
                     headers = {"Authorization": "Bearer " + token, "Content-Type": "application/json", "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-06-18"}
                     headers.update(extra or {})
-                    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
+                    body = json.dumps(rpc_request or {"jsonrpc": "2.0", "id": 1, "method": "ping"}).encode()
                     connection.request(method, "/shellink/mcp", iter([body[:10], body[10:]]) if chunked else body, headers, encode_chunked=chunked)
                     response = connection.getresponse()
                     status, payload = response.status, response.read()
@@ -130,6 +132,9 @@ def exercise(http_enabled):
 
                 if http_enabled:
                     assert request_http()[0] == 200
+                    status, payload = request_http(rpc_request={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "shellink_read_output", "arguments": {"id": session}}})
+                    assert status == 200
+                    assert json.loads(payload)["result"]["structuredContent"] == tool("read_output", id=session)["structuredContent"]
                     assert request_http("GET")[0] == 405
                     assert request_http(extra={"Origin": "http://evil.invalid"})[0] == 403
                     assert request_http(extra={"MCP-Protocol-Version": "invalid"})[0] == 400
@@ -144,7 +149,7 @@ def exercise(http_enabled):
                         raise AssertionError("public HTTP must stay disabled")
                 proxy.stdin.close()
                 assert proxy.wait(timeout=5) == 0
-                print(f"PASS: HTTP {'enabled' if http_enabled else 'disabled'}, stdio, raw input, cursors, mode switching, exit tracking, token rotation")
+                print(f"PASS: HTTP {'enabled' if http_enabled else 'disabled'}, stdio, raw input, recent output snapshots, mode switching, exit tracking, token rotation")
             except Exception:
                 desktop_log.seek(0)
                 stdio_log.seek(0)

@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -51,8 +51,8 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "shellink_read_output",
-        "Read plain terminal logs in chronological order (default 400 chunks, max 10000). Omit afterSeq for recent logs; use afterSeq=0 for full history. Resume with afterSeq=nextSeq and afterOffset=nextOffset, including partial chunks. maxChars bounds the response. With afterSeq, timeoutMs waits for new output or session exit. This is a log stream, not a rendered terminal screen.",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10000,"default":400},"afterSeq":{"type":"integer","minimum":0},"afterOffset":{"type":"integer","minimum":0,"default":0},"maxChars":{"type":"integer","minimum":1,"maximum":65536,"default":16000},"timeoutMs":{"type":"integer","minimum":0,"maximum":30000,"default":0}},"required":["id"]}"#,
+        "Read the latest plain terminal logs in chronological order. limit is the number of recent text lines (default 200, max 10000), including an unfinished final line such as a shell prompt. Lines are joined across PTY chunks and are not cut by character count. Each call returns a fresh snapshot without consuming output or tracking a cursor, so readers do not affect each other. hasEarlier indicates omitted older lines. Reads return immediately; repeat to observe later output. active describes the session, not command completion. This is a log snapshot, not a rendered terminal screen.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10000,"default":200}},"required":["id"]}"#,
     ),
     (
         "shellink_send_input",
@@ -353,7 +353,7 @@ fn process_request_with(
                     SUPPORTED_VERSIONS[0]
                 };
                 Ok(
-                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. For logs, resume read_output with nextSeq/nextOffset to avoid repetition. Set appendNewline=false for raw terminal keys. SSH MFA must be completed in the Desktop dialog."}),
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. read_output returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. Set appendNewline=false for raw terminal keys. SSH MFA must be completed in the Desktop dialog."}),
                 )
             }
             None => Err((-32602, "initialize requires protocolVersion".into())),
@@ -399,7 +399,7 @@ fn output_schema(name: &str) -> Value {
             json!({"id":{"type":"string"},"state":{"type":"string"},"mode":{"type":"string"},"active":{"type":"boolean"},"lastSeq":{"type":"integer"},"recentOutput":{"type":"string"},"exitCode":{"type":["integer","null"]}})
         }
         "shellink_read_output" => {
-            json!({"text":{"type":"string"},"nextSeq":{"type":"integer"},"nextOffset":{"type":"integer"},"hasMore":{"type":"boolean"},"hasEarlier":{"type":"boolean"},"active":{"type":"boolean"},"timedOut":{"type":"boolean"}})
+            json!({"text":{"type":"string"},"hasEarlier":{"type":"boolean"},"active":{"type":"boolean"}})
         }
         "shellink_send_input" => json!({"ok":{"type":"boolean"}}),
         "shellink_set_mode" => json!({"ok":{"type":"boolean"},"mode":{"type":"string"}}),
@@ -488,16 +488,6 @@ fn call_tool_with(
     if let Err(error) = validate_arguments(&args, &input_schema(schema)) {
         return Ok(tool_error("INVALID_ARGUMENT", &error));
     }
-    if name == "shellink_read_output"
-        && args.get("afterSeq").is_none()
-        && (args["afterOffset"].as_u64().unwrap_or(0) != 0
-            || args["timeoutMs"].as_u64().unwrap_or(0) != 0)
-    {
-        return Ok(tool_error(
-            "INVALID_ARGUMENT",
-            "afterSeq is required with afterOffset or timeoutMs",
-        ));
-    }
     if stop.load(Ordering::Acquire) {
         return Ok(tool_error("CANCELLED", "MCP listener is stopping"));
     }
@@ -531,7 +521,7 @@ fn call_tool_with(
             .map(|sessions| json!({"sessions":sessions})),
         "shellink_create_session" => create(args["profileId"].as_str().unwrap()),
         "shellink_session_state" => manager.state(db, id),
-        "shellink_read_output" => read_output(db, manager, &args, stop),
+        "shellink_read_output" => read_output(db, manager, &args),
         "shellink_send_input" => manager.input(
             db,
             id,
@@ -559,42 +549,12 @@ fn call_tool_with(
     })
 }
 
-fn read_output(
-    db: &DataStore,
-    manager: &SessionManager,
-    args: &Value,
-    stop: &AtomicBool,
-) -> Result<Value, String> {
+fn read_output(db: &DataStore, manager: &SessionManager, args: &Value) -> Result<Value, String> {
     let id = args["id"].as_str().unwrap();
-    let after_seq = args["afterSeq"].as_i64();
-    let after_offset = args["afterOffset"].as_u64().unwrap_or(0) as usize;
-    let timeout = args["timeoutMs"].as_u64().unwrap_or(0);
-    if after_seq.is_none() && (after_offset != 0 || timeout != 0) {
-        return Err("afterSeq is required with afterOffset or timeoutMs".into());
-    }
-    let deadline = Instant::now() + Duration::from_millis(timeout);
-    loop {
-        if stop.load(Ordering::Acquire) {
-            return Err("request cancelled".into());
-        }
-        let state = manager.state(db, id)?;
-        let mut result = db.read_output(
-            id,
-            after_seq,
-            after_offset,
-            args["limit"].as_i64().unwrap_or(400),
-            args["maxChars"].as_u64().unwrap_or(16000) as usize,
-        )?;
-        let timed_out = Instant::now() >= deadline;
-        result["active"] = state["active"].clone();
-        result["timedOut"] = json!(timed_out && timeout > 0 && result["text"].as_str() == Some(""));
-        if result["text"].as_str() != Some("") || state["active"] == false || timed_out {
-            return Ok(result);
-        }
-        thread::sleep(
-            Duration::from_millis(25).min(deadline.saturating_duration_since(Instant::now())),
-        );
-    }
+    let state = manager.state(db, id)?;
+    let mut result = db.read_output(id, args["limit"].as_u64().unwrap_or(200) as usize)?;
+    result["active"] = state["active"].clone();
+    Ok(result)
 }
 
 fn tool_success(value: Value) -> Value {
@@ -632,7 +592,12 @@ mod tests {
             .find(|tool| tool["name"] == "shellink_read_output")
             .unwrap();
         assert_eq!(read["annotations"]["readOnlyHint"], true);
-        assert_eq!(read["inputSchema"]["properties"]["limit"]["default"], 400);
+        assert_eq!(read["inputSchema"]["properties"]["limit"]["default"], 200);
+        assert_eq!(
+            read["inputSchema"]["properties"].as_object().unwrap().len(),
+            2
+        );
+        assert_eq!(read["inputSchema"]["required"], json!(["id"]));
         assert_eq!(read["outputSchema"]["type"], "object");
         let input = schemas
             .iter()
@@ -666,16 +631,16 @@ mod tests {
         );
         assert_eq!(switched["structuredContent"]["mode"], "AUTO");
         assert_eq!(db.session_mode("s").unwrap(), "AUTO");
-        let invalid = invoke(
-            &db,
-            &manager,
-            "shellink_read_output",
-            json!({"id":"s","limit":"400"}),
-        );
-        assert_eq!(
-            invalid["structuredContent"]["error"]["code"],
-            "INVALID_ARGUMENT"
-        );
+        for args in [
+            json!({"id":"s","limit":"200"}),
+            json!({"id":"s","maxChars":16000}),
+        ] {
+            let invalid = invoke(&db, &manager, "shellink_read_output", args);
+            assert_eq!(
+                invalid["structuredContent"]["error"]["code"],
+                "INVALID_ARGUMENT"
+            );
+        }
         let missing = invoke(
             &db,
             &manager,
@@ -689,37 +654,41 @@ mod tests {
     }
 
     #[test]
-    fn incremental_read_waits_for_output_and_times_out() {
-        let db = Arc::new(DataStore::test_store(PathBuf::new()));
+    fn output_reads_return_independent_recent_snapshots() {
+        let db = DataStore::test_store(PathBuf::new());
         let manager = SessionManager::new();
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
             .unwrap();
-        let output_db = db.clone();
-        let writer = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(40));
-            output_db.add_output("s", "ready\n").unwrap();
-        });
-        let result = invoke(
-            &db,
-            &manager,
-            "shellink_read_output",
-            json!({"id":"s","afterSeq":0,"timeoutMs":1000}),
+        let empty = invoke(&db, &manager, "shellink_read_output", json!({"id":"s"}));
+        assert_eq!(
+            empty["structuredContent"],
+            json!({"text":"","hasEarlier":false,"active":true})
         );
-        writer.join().unwrap();
-        assert_eq!(result["structuredContent"]["text"], "ready\n");
-        let seq = result["structuredContent"]["nextSeq"].clone();
-        let empty = invoke(
-            &db,
-            &manager,
-            "shellink_read_output",
-            json!({"id":"s","afterSeq":seq,"timeoutMs":20}),
+        db.add_output("s", "first\n").unwrap();
+        db.add_output("s", "latest\n").unwrap();
+        for _ in 0..2 {
+            let result = invoke(
+                &db,
+                &manager,
+                "shellink_read_output",
+                json!({"id":"s","limit":1}),
+            );
+            assert_eq!(
+                result["structuredContent"],
+                json!({"text":"latest\n","hasEarlier":true,"active":true})
+            );
+        }
+        db.update_session_state("s", "DISCONNECTED", Some("test"))
+            .unwrap();
+        let closed = invoke(&db, &manager, "shellink_read_output", json!({"id":"s"}));
+        assert_eq!(
+            closed["structuredContent"],
+            json!({"text":"first\nlatest\n","hasEarlier":false,"active":false})
         );
-        assert_eq!(empty["structuredContent"]["text"], "");
-        assert_eq!(empty["structuredContent"]["timedOut"], true);
         let cancelled = call_tool_with(
             &db,
             &manager,
-            &json!({"name":"shellink_read_output","arguments":{"id":"s","afterSeq":0}}),
+            &json!({"name":"shellink_read_output","arguments":{"id":"s"}}),
             &AtomicBool::new(true),
             |_| unreachable!(),
         )
