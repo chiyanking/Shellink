@@ -178,6 +178,14 @@
   color: var(--subtle-foreground);
   font: 8px var(--font-mono);
 }
+.session-history-item pre {
+  font-size: 10px;
+  line-height: 1.85;
+  margin-top: 5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--terminal-foreground);
+}
 .session-history-title {
   display: block;
   font-size: 10px;

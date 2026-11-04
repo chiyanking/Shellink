@@ -2186,6 +2186,13 @@ select {
   font-size: 12px;
   font-weight: 500;
 }
+.history-entry-content > pre {
+  font-size: 11px;
+  line-height: 1.7;
+  margin-top: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .history-entry-content .ui-badge {
   font-size: 8px;
   min-height: 16px;
