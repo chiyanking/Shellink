@@ -77,7 +77,7 @@ MCP HTTP 默认监听 `127.0.0.1:7070/shellink/mcp`。`SHELLINK_HOST`、`SHELLIN
 
 HTTP 采用无状态 Streamable HTTP JSON 响应，协商 `2025-06-18` 或 `2025-03-26`，stdio 另兼容 `2024-11-05`。HTTP 校验 Origin、Content-Type、Accept 与协议版本；未实现 SSE 的 GET 返回 405。请求头上限 16 KiB，请求体上限 4 MiB，支持有界的 chunked 请求；每个监听器最多处理 32 个并发连接，并限制读取时间。stdio 设置连接与读写超时，每次请求重新读取 Token，只对认证拒绝重试一次，避免在 I/O 失败后重放终端输入。
 
-工具返回 `structuredContent` 和对应 JSON 文本，声明输出 schema 与只读/破坏性等 annotations。错误使用 `isError` 和稳定的 `error.code/message`。发送输入支持 `appendNewline=false` 的原始按键，空文本可单独发送回车。日志工具每次立即返回最近输出的无状态快照，只需传入 session `id`；唯一的可选参数 `limit` 默认保留最新 200 行文本（最多 10000 行），最终文本按时间正序排列。读取从最新输出片段向前遍历，以 LF 换行分行并保留 CRLF，跨片段拼接完整行，不限制片段数量或字符数。末尾换行不额外增加一行空行；未换行的末尾提示符也算一行。响应包含 `text`、`hasEarlier` 和 `active`，`hasEarlier` 表示行数上限省略了更早文本，`active` 表示会话仍存活，不代表单条命令是否完成。不接受字符数、游标或等待参数，也不保存读取进度，多个 AI 读取同一 session 互不影响；后续输出通过再次读取观察，无变化时仍返回相同文本。ANSI 清理器跨 PTY 数据块保留状态，纯文本内容和原始回放内容分别保存。
+工具返回 `structuredContent` 和对应 JSON 文本，声明输出 schema 与只读/破坏性等 annotations。错误使用 `isError` 和稳定的 `error.code/message`。发送输入原样写入 PTY，命令需自带结尾换行才会执行，原始按键不带换行；只含换行的文本即单独发送回车。日志工具每次立即返回最近输出的无状态快照，只需传入 session `id`；唯一的可选参数 `limit` 默认保留最新 200 行文本（最多 10000 行），最终文本按时间正序排列。读取从最新输出片段向前遍历，以 LF 换行分行并保留 CRLF，跨片段拼接完整行，不限制片段数量或字符数。末尾换行不额外增加一行空行；未换行的末尾提示符也算一行。响应包含 `text`、`hasEarlier` 和 `active`，`hasEarlier` 表示行数上限省略了更早文本，`active` 表示会话仍存活，不代表单条命令是否完成。不接受字符数、游标或等待参数，也不保存读取进度，多个 AI 读取同一 session 互不影响；后续输出通过再次读取观察，无变化时仍返回相同文本。ANSI 清理器跨 PTY 数据块保留状态，纯文本内容和原始回放内容分别保存。
 
 Webhook 回调地址为 `/shellink/webhook/callback`，接收 JSON 后向 Desktop 事件总线发布 `webhook.received`，并在内存消息列表中保留最近消息。HTTP 开关同时控制 MCP HTTP 和 Webhook 回调；关闭 Desktop 后二者都不可用。
 

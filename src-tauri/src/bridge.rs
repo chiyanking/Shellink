@@ -263,10 +263,6 @@ fn dispatch(app: &AppHandle, backend: &Backend, method: &str, params: &Value) ->
                 .and_then(Value::as_str)
                 .ok_or("text must be a string")?,
             params
-                .get("appendNewline")
-                .and_then(Value::as_bool)
-                .unwrap_or(true),
-            params
                 .get("manual")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),

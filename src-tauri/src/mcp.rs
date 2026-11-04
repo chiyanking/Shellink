@@ -56,8 +56,8 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "shellink_send_input",
-        "Send text to an AUTO session. appendNewline defaults to true for commands. Set it to false for raw keys: Ctrl-C=\\u0003, Tab=\\t, Escape=\\u001b, Up=\\u001b[A. Empty text with appendNewline=true sends Enter. Use read_output to observe the result.",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144},"appendNewline":{"type":"boolean","default":true}},"required":["id","text"]}"#,
+        "Send raw text to an AUTO session. text is written to the PTY verbatim: end commands with a trailing newline (LF) to execute them, otherwise the shell only sees typed characters. Raw keys need no newline: Ctrl-C=\\u0003, Tab=\\t, Escape=\\u001b, Up=\\u001b[A. Send a single newline alone for a bare Enter. Use read_output to observe the result.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144}},"required":["id","text"]}"#,
     ),
     (
         "shellink_set_mode",
@@ -353,7 +353,7 @@ fn process_request_with(
                     SUPPORTED_VERSIONS[0]
                 };
                 Ok(
-                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. read_output returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. Set appendNewline=false for raw terminal keys. SSH MFA must be completed in the Desktop dialog."}),
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. read_output returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. send_input writes text verbatim: end commands with a trailing newline, raw keys need none. SSH MFA must be completed in the Desktop dialog."}),
                 )
             }
             None => Err((-32602, "initialize requires protocolVersion".into())),
@@ -522,13 +522,8 @@ fn call_tool_with(
         "shellink_create_session" => create(args["profileId"].as_str().unwrap()),
         "shellink_session_state" => manager.state(db, id),
         "shellink_read_output" => read_output(db, manager, &args),
-        "shellink_send_input" => manager.input(
-            db,
-            id,
-            args["text"].as_str().unwrap(),
-            args["appendNewline"].as_bool().unwrap_or(true),
-            false,
-        ),
+        // text is sent verbatim; each call is recorded as one history entry.
+        "shellink_send_input" => manager.input_api(db, id, args["text"].as_str().unwrap()),
         "shellink_set_mode" => manager.set_mode(db, id, args["mode"].as_str().unwrap()),
         "shellink_close_session" => manager.close(db, id),
         _ => unreachable!(),
@@ -605,9 +600,14 @@ mod tests {
             .unwrap();
         assert_eq!(input["inputSchema"]["required"], json!(["id", "text"]));
         assert_eq!(
-            input["inputSchema"]["properties"]["appendNewline"]["default"],
-            true
+            input["inputSchema"]["properties"]
+                .as_object()
+                .unwrap()
+                .len(),
+            2,
+            "send_input takes only id and text"
         );
+        assert!(input["inputSchema"]["properties"]["appendNewline"].is_null());
     }
 
     #[test]

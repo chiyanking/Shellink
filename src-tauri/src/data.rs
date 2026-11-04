@@ -202,7 +202,13 @@ impl DataStore {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,plain,0,now()]).map_err(|e|e.to_string())?;
+        // Pure control sequences (title changes, cursor moves, screen clears)
+        // carry no readable text. Keep their raw bytes for replay/events but
+        // hide them from history and read_output, which filter on internal=0.
+        // Only chunks with no text at all are hidden; a chunk made of newlines
+        // is real output and must stay visible to read_output.
+        let internal = plain.is_empty();
+        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,plain,internal,now()]).map_err(|e|e.to_string())?;
         c.execute(
             "UPDATE sessions SET state='OUTPUTTING' WHERE id=? AND state!='DISCONNECTED'",
             [id],
@@ -308,7 +314,13 @@ impl DataStore {
         self.save_mcp_state(&state)?;
         self.mcp_info()
     }
-    pub fn add_input(&self, id: &str, text: &str) -> Result<(), String> {
+    /// Persist one submitted command. `raw` keeps the exact keystrokes while
+    /// `display` is the readable form shown in history. Empty lines are never
+    /// stored, so an input chunk always corresponds to an actual command.
+    pub fn add_input_plain(&self, id: &str, raw: &str, display: &str) -> Result<(), String> {
+        if display.trim().is_empty() {
+            return Ok(());
+        }
         let c = self.conn.lock().unwrap();
         let seq: i64 = c
             .query_row(
@@ -317,7 +329,12 @@ impl DataStore {
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())?;
-        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"input",text,crate::ansi::AnsiStripper::default().feed(text),0,now()]).map_err(|e|e.to_string()).map(|_|())
+        c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"input",raw,display,0,now()]).map_err(|e|e.to_string()).map(|_|())
+    }
+
+    #[cfg(test)]
+    pub fn add_input(&self, id: &str, text: &str) -> Result<(), String> {
+        self.add_input_plain(id, text, text)
     }
     pub fn history_chunks(&self, id: &str, since: i64, limit: i64) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
@@ -1039,6 +1056,42 @@ mod tests {
         for limit in [0, 10_001] {
             assert!(db.read_output("s", limit).is_err());
         }
+    }
+
+    #[test]
+    fn control_only_output_stays_raw_but_is_hidden_from_history() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        db.add_output_plain("s", "\x1b]0;title\x07\x1b[H\x1b[J", "")
+            .unwrap();
+        db.add_output("s", "visible\n").unwrap();
+
+        let chunks = db.history_chunks("s", 0, 100).unwrap();
+        let items = chunks["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["plain"], "visible\n");
+        assert_eq!(db.read_output("s", 100).unwrap()["text"], "visible\n");
+        // Raw bytes remain available for terminal replay.
+        assert!(
+            db.replay("s").unwrap()["raw"]
+                .as_str()
+                .unwrap()
+                .contains("title")
+        );
+    }
+
+    #[test]
+    fn empty_input_lines_are_never_stored() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        db.add_input_plain("s", "\x1b[A", "").unwrap();
+        db.add_input_plain("s", "ls\r", "ls").unwrap();
+        let chunks = db.history_chunks("s", 0, 100).unwrap();
+        let items = chunks["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["plain"], "ls");
     }
 
     fn test_dir(label: &str) -> PathBuf {

@@ -66,7 +66,7 @@ HTTP uses the stateless JSON response form of Streamable HTTP. Clients send `Con
 
 MCP tools return both JSON text content and `structuredContent`, with output schemas and tool annotations. Tool failures set `isError: true` and include `error.code` and `error.message`. Common codes are `INVALID_ARGUMENT`, `SESSION_NOT_FOUND`, `PROFILE_NOT_FOUND`, `MANUAL_MODE`, `AUTH_REQUIRED`, `CANCELLED`, and `OPERATION_FAILED`.
 
-`shellink_send_input` appends a newline by default. Pass `appendNewline: false` to send raw keys such as `"\u0003"` (Ctrl-C), `"\t"`, or `"\u001b[A"` (Up). Sending empty text with `appendNewline: true` sends Enter. AUTO/MANUAL are collaboration modes: MANUAL rejects MCP input, and MCP can call `shellink_set_mode` to switch back to AUTO.
+`shellink_send_input` writes `text` to the PTY verbatim — there is no implicit newline. Commands must end with a trailing newline to execute; without it the shell only receives the typed characters. Raw keys carry no newline: `"\u0003"` (Ctrl-C), `"\t"` (Tab), or `"\u001b[A"` (Up). A text containing only a newline sends Enter. AUTO/MANUAL are collaboration modes: MANUAL rejects MCP input, and MCP can call `shellink_set_mode` to switch back to AUTO.
 
 `shellink_read_output` returns a fresh snapshot of the latest plain-text logs, in chronological order. Only the session `id` is required:
 

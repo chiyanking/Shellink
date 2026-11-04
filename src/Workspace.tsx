@@ -126,7 +126,7 @@ function TerminalContent({ session }: { session: Session }) {
     // Parse replay at the visible dimensions, rather than xterm's default 80×24.
     resizeTerminal()
     const sendInput = createTerminalInput(
-      text => rpc('sessions.input', { id: session.id, text, manual: true, appendNewline: false }),
+      text => rpc('sessions.input', { id: session.id, text, manual: true }),
       error => { if (alive) notify(String(error)) },
     )
     const input = terminal.onData(data => {
