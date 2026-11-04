@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import { useDesign } from './context'
+import { createCommandHighlighter, terminalTheme } from './terminal-appearance'
 import { emptyConnection, sessionStatus, type Session } from './data'
 import { onCoreEvent, rpc } from './backend'
 import { Badge, Button, Hint, Menu } from './components/ui'
@@ -71,23 +72,20 @@ function TerminalContent({ session }: { session: Session }) {
   useEffect(() => {
     if (!host.current || !session.id || readyFont !== fontDescriptor) return
     let alive = true
-    const token = (name: string, fallback: string) =>
-      getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
     const terminal = new XTerm({
       convertEol: true,
       cursorBlink: true,
+      cursorStyle: 'bar',
+      cursorWidth: 2,
       fontFamily: `"${font}", monospace`,
       fontSize: Number(fontSize),
+      lineHeight: 1.35,
       // xterm 6 uses this width for both its scrollbar and FitAddon's column budget.
       overviewRuler: { width: TERMINAL_SCROLLBAR_WIDTH },
-      theme: {
-        background: token('--terminal-canvas', '#121317'),
-        foreground: token('--terminal-foreground', '#aeb4c1'),
-        cursor: token('--terminal-cursor', '#9cb4f5'),
-        cursorAccent: token('--terminal-canvas', '#121317'),
-        selectionBackground: colorScheme === 'dark' ? '#39405a' : '#cfdcfb',
-      },
+      theme: terminalTheme(colorScheme),
     })
+    const highlight = createCommandHighlighter(colorScheme)
+    const write = (raw: string) => terminal.write(highlight(raw))
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.current)
     let replaySeq = 0
     const buffered: { seq: number; raw: string }[] = []
@@ -139,15 +137,15 @@ function TerminalContent({ session }: { session: Session }) {
         if (!alive || event.event !== 'session.data' || event.data.sessionId !== session.id || event.data.direction !== 'output' || typeof event.data.raw !== 'string') return
         const seq = Number(event.data.seq ?? event.seq ?? 0)
         if (replaying) buffered.push({ seq, raw: event.data.raw })
-        else if (seq > replaySeq) { terminal.write(event.data.raw); replaySeq = seq }
+        else if (seq > replaySeq) { write(event.data.raw); replaySeq = seq }
       })
       if (!alive) { off(); return }
       dispose = off
       const replay = await rpc<{ raw: string; cursor: number }>('sessions.replay', { id: session.id }).catch(error => { if (alive) notify(String(error)); return null })
       if (!alive) return
-      if (replay) { terminal.write(replay.raw); replaySeq = replay.cursor }
+      if (replay) { write(replay.raw); replaySeq = replay.cursor }
       replaying = false
-      buffered.sort((a, b) => a.seq - b.seq).forEach(item => { if (item.seq > replaySeq) { terminal.write(item.raw); replaySeq = item.seq } })
+      buffered.sort((a, b) => a.seq - b.seq).forEach(item => { if (item.seq > replaySeq) { write(item.raw); replaySeq = item.seq } })
     })().catch(error => { if (alive) notify(String(error)) })
     return () => { alive = false; dispose?.(); resizeObserver.disconnect(); cancelAnimationFrame(resizeFrame); input.dispose(); terminal.dispose() }
   }, [session.id, font, fontSize, fontDescriptor, readyFont, coreEpoch, notify, colorScheme])

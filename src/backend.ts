@@ -1,5 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+
+const DESKTOP_REQUIRED = '当前是浏览器预览，没有 Shellink 桌面后端。请在项目目录运行 npm run desktop:dev 打开原生窗口后再使用。'
 
 export type Profile = { id: string; name: string; connectType: 'ssh' | 'command'; host: string; port: number; username: string; authType: 'password' | 'password-mfa' | 'key' | 'keyboard-interactive'; command: string | null; hasPassword: boolean; hasPrivateKey: boolean; term: string; cols: number; rows: number }
 export type SessionRecord = { id: string; profileId: string; profileName: string; name: string; source: string; target: string; state: string; mode: 'AUTO' | 'MANUAL'; createdAt: number; closedAt?: number; closeReason?: string; active: boolean }
@@ -9,11 +11,17 @@ export type CallbackRecord = { id: string; receivedAt: number; data: unknown }
 export type HistoryChunk = { id: number; seq: number; sessionId: string; direction: 'input' | 'output'; plain: string; createdAt: number }
 export type CoreEvent = { subscriptionId: string; event: string; data: { sessionId?: string; direction?: string; raw?: string; plain?: string; seq?: number; [key: string]: unknown }; seq?: number }
 export function rpc<T = unknown>(method: string, params: object = {}, timeoutMs = 30000): Promise<T> {
-  if (!isTauri()) return Promise.reject(new Error('请使用 Shellink 桌面应用连接后台。可运行 npm run desktop:dev 打开原生窗口。'))
+  if (!isTauri()) return Promise.reject(new Error(DESKTOP_REQUIRED))
   return invoke<T>('core_request', { method, params, timeoutMs })
 }
-export const onCoreEvent = (callback: (event: CoreEvent) => void) => listen<CoreEvent>('shellink:event', event => callback(event.payload))
-export function openDirectory(path: string) { return invoke('open_data_directory', { path }) }
+export async function onCoreEvent(callback: (event: CoreEvent) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return () => {}
+  return listen<CoreEvent>('shellink:event', event => callback(event.payload))
+}
+export function openDirectory(path: string): Promise<void> {
+  if (!isTauri()) return Promise.reject(new Error(DESKTOP_REQUIRED))
+  return invoke<void>('open_data_directory', { path })
+}
 export function errorText(error: unknown) { return error instanceof Error ? error.message : String(error) }
 export function downloadJSON(name: string, data: unknown) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
