@@ -196,15 +196,18 @@ impl SessionManager {
     }
 
     /// Submit MCP commands by appending LF unless text already ends in LF/CR.
-    /// Raw input is forwarded unchanged. Each nonblank action gets one history
-    /// entry with the actual sent bytes, without touching the desktop line buffer.
-    pub fn input_api(
-        &self,
-        db: &DataStore,
-        id: &str,
-        text: &str,
-        raw: bool,
-    ) -> Result<Value, String> {
+    pub fn input_api(&self, db: &DataStore, id: &str, text: &str) -> Result<Value, String> {
+        let text = if text.ends_with(['\n', '\r']) {
+            Cow::Borrowed(text)
+        } else {
+            Cow::Owned(format!("{text}\n"))
+        };
+        self.input_raw_api(db, id, &text)
+    }
+
+    /// Forward MCP input unchanged. Each nonblank action gets one history entry
+    /// with the actual sent bytes, without touching the desktop line buffer.
+    pub fn input_raw_api(&self, db: &DataStore, id: &str, text: &str) -> Result<Value, String> {
         self.reap_finished(db);
         let mut live = self.live.lock().unwrap();
         // MCP never bypasses MANUAL mode; only a human at the keyboard can.
@@ -213,17 +216,12 @@ impl SessionManager {
         }
         let session = live.get_mut(id).ok_or("Session not found")?;
         Self::guard_auth(session)?;
-        let text = if raw || text.ends_with(['\n', '\r']) {
-            Cow::Borrowed(text)
-        } else {
-            Cow::Owned(format!("{text}\n"))
-        };
-        Self::forward_pty(session, &text)?;
-        let display = readable_command(&text);
+        Self::forward_pty(session, text)?;
+        let display = readable_command(text);
         // A trailing newline submits the command but is not part of its text.
         let display = display.strip_suffix('\n').unwrap_or(&display);
         // A bare Enter has no readable text and is intentionally not stored.
-        db.add_input_plain(id, &text, display)?;
+        db.add_input_plain(id, text, display)?;
         Ok(json!({"ok":true}))
     }
 
@@ -652,11 +650,11 @@ mod tests {
 
         // Each call is its own history entry: raw keys are not held back waiting
         // for a later CR, and a following command cannot discard them.
-        manager.input_api(&db, "s", "\x1b[A", true).unwrap();
-        manager.input_api(&db, "s", "make build", false).unwrap();
-        manager.input_api(&db, "s", "\t", true).unwrap();
-        manager.input_api(&db, "s", "\x03", true).unwrap();
-        manager.input_api(&db, "s", "", false).unwrap(); // bare Enter
+        manager.input_raw_api(&db, "s", "\x1b[A").unwrap();
+        manager.input_api(&db, "s", "make build").unwrap();
+        manager.input_raw_api(&db, "s", "\t").unwrap();
+        manager.input_raw_api(&db, "s", "\x03").unwrap();
+        manager.input_api(&db, "s", "").unwrap(); // bare Enter
         assert_eq!(&*captured.lock().unwrap(), b"\x1b[Amake build\n\t\x03\n");
 
         // A partially typed human line survives an API call and is still
@@ -664,7 +662,7 @@ mod tests {
         for key in ["e", "c"] {
             manager.input(&db, "s", key, true).unwrap();
         }
-        manager.input_api(&db, "s", "pwd\n", false).unwrap();
+        manager.input_api(&db, "s", "pwd\n").unwrap();
         manager.input(&db, "s", "ho\r", true).unwrap();
 
         let chunks = db.history_chunks("s", 0, 100).unwrap();
@@ -711,7 +709,11 @@ mod tests {
             ("", true, ""),
         ] {
             captured.lock().unwrap().clear();
-            manager.input_api(&db, "s", text, raw).unwrap();
+            if raw {
+                manager.input_raw_api(&db, "s", text).unwrap();
+            } else {
+                manager.input_api(&db, "s", text).unwrap();
+            }
             assert_eq!(
                 &*captured.lock().unwrap(),
                 expected.as_bytes(),

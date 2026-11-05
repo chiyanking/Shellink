@@ -78,18 +78,18 @@ def exercise(http_enabled):
                 proxy.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
                 proxy.stdin.flush()
                 tools = rpc("tools/list")["tools"]
-                assert len(tools) == 9 and not any(tool["name"] == "screen" for tool in tools)
+                assert len(tools) == 10 and not any(tool["name"] == "screen" for tool in tools)
                 assert all("annotations" in item and "outputSchema" in item for item in tools)
                 read_tool = next(item for item in tools if item["name"] == "read_output")
                 assert set(read_tool["inputSchema"]["properties"]) == {"id", "limit"}
-                input_tool = next(item for item in tools if item["name"] == "send_input")
-                assert set(input_tool["inputSchema"]["properties"]) == {"id", "text", "raw"}
-                assert input_tool["inputSchema"]["properties"]["raw"]["default"] is False
+                for name in ("send_input", "send_raw_input"):
+                    input_tool = next(item for item in tools if item["name"] == name)
+                    assert set(input_tool["inputSchema"]["properties"]) == {"id", "text"}
                 profile = tool("create_profile", name="integration", connectType="command", command="exec /bin/sh")["structuredContent"]
                 session = tool("create_session", profileId=profile["id"])["structuredContent"]["id"]
                 # The typed command contains octal escapes, so PTY echo cannot fake the marker.
                 raw_command = r"printf '\115\103\120\137\122\101\127\137\117\113\n'"
-                assert tool("send_input", id=session, text=raw_command, raw=True)["isError"] is False
+                assert tool("send_raw_input", id=session, text=raw_command)["isError"] is False
                 time.sleep(0.1)
                 before = tool("read_output", id=session)["structuredContent"]
                 assert "MCP_RAW_OK" not in before["text"], before
@@ -115,8 +115,9 @@ def exercise(http_enabled):
                     ).fetchall()
                 assert inputs == [(raw_command,), (auto_command + "\n",)], inputs
                 tool("set_mode", id=session, mode="MANUAL")
-                denied = tool("send_input", id=session, text="pwd")
-                assert denied["structuredContent"]["error"]["code"] == "MANUAL_MODE"
+                for name in ("send_input", "send_raw_input"):
+                    denied = tool(name, id=session, text="pwd")
+                    assert denied["structuredContent"]["error"]["code"] == "MANUAL_MODE"
                 assert tool("set_mode", id=session, mode="AUTO")["structuredContent"]["mode"] == "AUTO"
                 assert tool("send_input", id=session, text="exit 7")["isError"] is False
 

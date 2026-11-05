@@ -56,8 +56,13 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "send_input",
-        "Submit a command to an AUTO session, adding a newline if needed. Set raw=true for verbatim input. Use read_output to observe the result.",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144},"raw":{"type":"boolean","default":false,"description":"Send text verbatim without adding a newline"}},"required":["id","text"]}"#,
+        "Submit a command to an AUTO session, adding a newline if needed. Use read_output to observe the result.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144}},"required":["id","text"]}"#,
+    ),
+    (
+        "send_raw_input",
+        "Send text verbatim to an AUTO session without adding a newline, for control keys and interactive input. Use read_output to observe the result.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144}},"required":["id","text"]}"#,
     ),
     (
         "set_mode",
@@ -353,7 +358,7 @@ fn process_request_with(
                     SUPPORTED_VERSIONS[0]
                 };
                 Ok(
-                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. read_output returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. send_input automatically adds a newline to submit commands unless text already ends with LF or CR; use raw=true to send text verbatim. Success confirms input was sent, not command completion. SSH MFA must be completed in the Desktop dialog."}),
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. read_output returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. send_input automatically adds a newline to submit commands unless text already ends with LF or CR; send_raw_input sends text verbatim without adding a newline. Success confirms input was sent, not command completion. SSH MFA must be completed in the Desktop dialog."}),
                 )
             }
             None => Err((-32602, "initialize requires protocolVersion".into())),
@@ -401,7 +406,7 @@ fn output_schema(name: &str) -> Value {
         "read_output" => {
             json!({"text":{"type":"string"},"hasEarlier":{"type":"boolean"},"active":{"type":"boolean"}})
         }
-        "send_input" => json!({"ok":{"type":"boolean"}}),
+        "send_input" | "send_raw_input" => json!({"ok":{"type":"boolean"}}),
         "set_mode" => json!({"ok":{"type":"boolean"},"mode":{"type":"string"}}),
         "close_session" => json!({"closed":{"type":"boolean"}}),
         _ => unreachable!(),
@@ -522,12 +527,8 @@ fn call_tool_with(
         "create_session" => create(args["profileId"].as_str().unwrap()),
         "session_state" => manager.state(db, id),
         "read_output" => read_output(db, manager, &args),
-        "send_input" => manager.input_api(
-            db,
-            id,
-            args["text"].as_str().unwrap(),
-            args["raw"].as_bool().unwrap_or(false),
-        ),
+        "send_input" => manager.input_api(db, id, args["text"].as_str().unwrap()),
+        "send_raw_input" => manager.input_raw_api(db, id, args["text"].as_str().unwrap()),
         "set_mode" => manager.set_mode(db, id, args["mode"].as_str().unwrap()),
         "close_session" => manager.close(db, id),
         _ => unreachable!(),
@@ -584,7 +585,7 @@ mod tests {
     #[test]
     fn tools_expose_typed_results_and_no_screen_emulator() {
         let schemas = tools();
-        assert_eq!(schemas.len(), 9);
+        assert_eq!(schemas.len(), 10);
         assert!(!schemas.iter().any(|tool| tool["name"] == "screen"));
         let read = schemas
             .iter()
@@ -598,21 +599,18 @@ mod tests {
         );
         assert_eq!(read["inputSchema"]["required"], json!(["id"]));
         assert_eq!(read["outputSchema"]["type"], "object");
-        let input = schemas
-            .iter()
-            .find(|tool| tool["name"] == "send_input")
-            .unwrap();
-        assert_eq!(input["inputSchema"]["required"], json!(["id", "text"]));
-        assert_eq!(
-            input["inputSchema"]["properties"]
-                .as_object()
-                .unwrap()
-                .len(),
-            3,
-            "send_input takes id, text and an optional raw flag"
-        );
-        assert_eq!(input["inputSchema"]["properties"]["raw"]["default"], false);
-        assert!(input["inputSchema"]["properties"]["appendNewline"].is_null());
+        for name in ["send_input", "send_raw_input"] {
+            let input = schemas.iter().find(|tool| tool["name"] == name).unwrap();
+            assert_eq!(input["inputSchema"]["required"], json!(["id", "text"]));
+            assert_eq!(
+                input["inputSchema"]["properties"]
+                    .as_object()
+                    .unwrap()
+                    .len(),
+                2,
+                "{name} takes only id and text"
+            );
+        }
     }
 
     #[test]
@@ -621,21 +619,25 @@ mod tests {
         let manager = SessionManager::new();
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "MANUAL")
             .unwrap();
-        let manual = invoke(&db, &manager, "send_input", json!({"id":"s","text":"pwd"}));
-        assert_eq!(manual["structuredContent"]["error"]["code"], "MANUAL_MODE");
+        for name in ["send_input", "send_raw_input"] {
+            let manual = invoke(&db, &manager, name, json!({"id":"s","text":"pwd"}));
+            assert_eq!(manual["structuredContent"]["error"]["code"], "MANUAL_MODE");
+        }
         let switched = invoke(&db, &manager, "set_mode", json!({"id":"s","mode":"AUTO"}));
         assert_eq!(switched["structuredContent"]["mode"], "AUTO");
         assert_eq!(db.session_mode("s").unwrap(), "AUTO");
-        let invalid_raw = invoke(
-            &db,
-            &manager,
-            "send_input",
-            json!({"id":"s","text":"pwd","raw":"true"}),
-        );
-        assert_eq!(
-            invalid_raw["structuredContent"]["error"]["code"],
-            "INVALID_ARGUMENT"
-        );
+        for name in ["send_input", "send_raw_input"] {
+            let invalid_raw = invoke(
+                &db,
+                &manager,
+                name,
+                json!({"id":"s","text":"pwd","raw":true}),
+            );
+            assert_eq!(
+                invalid_raw["structuredContent"]["error"]["code"],
+                "INVALID_ARGUMENT"
+            );
+        }
         for args in [
             json!({"id":"s","limit":"200"}),
             json!({"id":"s","maxChars":16000}),
