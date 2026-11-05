@@ -69,7 +69,7 @@ def exercise(http_enabled):
                     return response["result"]
 
                 def tool(tool_name, **arguments):
-                    result = rpc("tools/call", {"name": "shellink_" + tool_name, "arguments": arguments})
+                    result = rpc("tools/call", {"name": tool_name, "arguments": arguments})
                     assert json.loads(result["content"][0]["text"]) == result["structuredContent"]
                     return result
 
@@ -78,18 +78,22 @@ def exercise(http_enabled):
                 proxy.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
                 proxy.stdin.flush()
                 tools = rpc("tools/list")["tools"]
-                assert len(tools) == 9 and not any(tool["name"] == "shellink_screen" for tool in tools)
+                assert len(tools) == 9 and not any(tool["name"] == "screen" for tool in tools)
                 assert all("annotations" in item and "outputSchema" in item for item in tools)
-                read_tool = next(item for item in tools if item["name"] == "shellink_read_output")
+                read_tool = next(item for item in tools if item["name"] == "read_output")
                 assert set(read_tool["inputSchema"]["properties"]) == {"id", "limit"}
+                input_tool = next(item for item in tools if item["name"] == "send_input")
+                assert set(input_tool["inputSchema"]["properties"]) == {"id", "text", "raw"}
+                assert input_tool["inputSchema"]["properties"]["raw"]["default"] is False
                 profile = tool("create_profile", name="integration", connectType="command", command="exec /bin/sh")["structuredContent"]
                 session = tool("create_session", profileId=profile["id"])["structuredContent"]["id"]
                 # The typed command contains octal escapes, so PTY echo cannot fake the marker.
-                tool("send_input", id=session, text=r"printf '\115\103\120\137\122\101\127\137\117\113\n'", appendNewline=False)
+                raw_command = r"printf '\115\103\120\137\122\101\127\137\117\113\n'"
+                assert tool("send_input", id=session, text=raw_command, raw=True)["isError"] is False
                 time.sleep(0.1)
                 before = tool("read_output", id=session)["structuredContent"]
                 assert "MCP_RAW_OK" not in before["text"], before
-                tool("send_input", id=session, text="", appendNewline=True)
+                assert tool("send_input", id=session, text="")["isError"] is False
                 def marker_output():
                     snapshot = tool("read_output", id=session)["structuredContent"]
                     return snapshot if "MCP_RAW_OK" in snapshot["text"] else None
@@ -100,11 +104,21 @@ def exercise(http_enabled):
                 tail = tool("read_output", id=session, limit=1)["structuredContent"]
                 assert len(tail["text"].splitlines()) <= 1 and tail["hasEarlier"] is True, tail
                 assert "MCP_RAW_OK" in tool("read_output", id=session)["structuredContent"]["text"]
+                # A command without a trailing newline is submitted by default.
+                auto_command = r"printf '\115\103\120\137\101\125\124\117\137\117\113\n'"
+                assert tool("send_input", id=session, text=auto_command)["isError"] is False
+                wait_until(lambda: "MCP_AUTO_OK" in tool("read_output", id=session)["structuredContent"]["text"])
+                with sqlite3.connect(database) as db:
+                    inputs = db.execute(
+                        "SELECT data_raw FROM history_chunks WHERE session_id=? AND direction='input' ORDER BY seq",
+                        (session,),
+                    ).fetchall()
+                assert inputs == [(raw_command,), (auto_command + "\n",)], inputs
                 tool("set_mode", id=session, mode="MANUAL")
                 denied = tool("send_input", id=session, text="pwd")
                 assert denied["structuredContent"]["error"]["code"] == "MANUAL_MODE"
                 assert tool("set_mode", id=session, mode="AUTO")["structuredContent"]["mode"] == "AUTO"
-                tool("send_input", id=session, text="exit 7")
+                assert tool("send_input", id=session, text="exit 7")["isError"] is False
 
                 # Poll SQLite directly: exit tracking must work without a UI/MCP state query.
                 def exited():
@@ -132,7 +146,7 @@ def exercise(http_enabled):
 
                 if http_enabled:
                     assert request_http()[0] == 200
-                    status, payload = request_http(rpc_request={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "shellink_read_output", "arguments": {"id": session}}})
+                    status, payload = request_http(rpc_request={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "read_output", "arguments": {"id": session}}})
                     assert status == 200
                     assert json.loads(payload)["result"]["structuredContent"] == tool("read_output", id=session)["structuredContent"]
                     assert request_http("GET")[0] == 405
@@ -149,7 +163,7 @@ def exercise(http_enabled):
                         raise AssertionError("public HTTP must stay disabled")
                 proxy.stdin.close()
                 assert proxy.wait(timeout=5) == 0
-                print(f"PASS: HTTP {'enabled' if http_enabled else 'disabled'}, stdio, raw input, recent output snapshots, mode switching, exit tracking, token rotation")
+                print(f"PASS: HTTP {'enabled' if http_enabled else 'disabled'}, stdio, automatic command submission, raw input, recent output snapshots, mode switching, exit tracking, token rotation")
             except Exception:
                 desktop_log.seek(0)
                 stdio_log.seek(0)

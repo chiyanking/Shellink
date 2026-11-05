@@ -4,6 +4,7 @@ use crate::ssh_auth::{Credential, SshAuth};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde_json::{Value, json};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     io::{Read, Write},
     path::PathBuf,
@@ -157,9 +158,8 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Forward bytes to the PTY verbatim on the same call. Nothing here buffers
-    /// or appends: callers put the trailing newline in `text` when they want the
-    /// shell to execute a command.
+    /// Forward prepared bytes to the PTY immediately, without buffering or
+    /// changing line endings.
     fn forward_pty(session: &Live, text: &str) -> Result<(), String> {
         let mut input = session
             .input
@@ -195,11 +195,16 @@ impl SessionManager {
         Ok(json!({"ok":true}))
     }
 
-    /// One `shellink_send_input` call is one complete action (a command, a raw
-    /// key, an interactive answer) and gets exactly one history entry. It never
-    /// touches the desktop line buffer, so API keys are neither held back until
-    /// a later CR nor merged into human keystrokes.
-    pub fn input_api(&self, db: &DataStore, id: &str, text: &str) -> Result<Value, String> {
+    /// Submit MCP commands by appending LF unless text already ends in LF/CR.
+    /// Raw input is forwarded unchanged. Each nonblank action gets one history
+    /// entry with the actual sent bytes, without touching the desktop line buffer.
+    pub fn input_api(
+        &self,
+        db: &DataStore,
+        id: &str,
+        text: &str,
+        raw: bool,
+    ) -> Result<Value, String> {
         self.reap_finished(db);
         let mut live = self.live.lock().unwrap();
         // MCP never bypasses MANUAL mode; only a human at the keyboard can.
@@ -208,12 +213,17 @@ impl SessionManager {
         }
         let session = live.get_mut(id).ok_or("Session not found")?;
         Self::guard_auth(session)?;
-        Self::forward_pty(session, text)?;
-        let display = readable_command(text);
+        let text = if raw || text.ends_with(['\n', '\r']) {
+            Cow::Borrowed(text)
+        } else {
+            Cow::Owned(format!("{text}\n"))
+        };
+        Self::forward_pty(session, &text)?;
+        let display = readable_command(&text);
         // A trailing newline submits the command but is not part of its text.
         let display = display.strip_suffix('\n').unwrap_or(&display);
         // A bare Enter has no readable text and is intentionally not stored.
-        db.add_input_plain(id, text, display)?;
+        db.add_input_plain(id, &text, display)?;
         Ok(json!({"ok":true}))
     }
 
@@ -642,11 +652,11 @@ mod tests {
 
         // Each call is its own history entry: raw keys are not held back waiting
         // for a later CR, and a following command cannot discard them.
-        manager.input_api(&db, "s", "\x1b[A").unwrap();
-        manager.input_api(&db, "s", "make build\n").unwrap();
-        manager.input_api(&db, "s", "\t").unwrap();
-        manager.input_api(&db, "s", "\x03").unwrap();
-        manager.input_api(&db, "s", "\n").unwrap(); // bare Enter
+        manager.input_api(&db, "s", "\x1b[A", true).unwrap();
+        manager.input_api(&db, "s", "make build", false).unwrap();
+        manager.input_api(&db, "s", "\t", true).unwrap();
+        manager.input_api(&db, "s", "\x03", true).unwrap();
+        manager.input_api(&db, "s", "", false).unwrap(); // bare Enter
         assert_eq!(&*captured.lock().unwrap(), b"\x1b[Amake build\n\t\x03\n");
 
         // A partially typed human line survives an API call and is still
@@ -654,7 +664,7 @@ mod tests {
         for key in ["e", "c"] {
             manager.input(&db, "s", key, true).unwrap();
         }
-        manager.input_api(&db, "s", "pwd\n").unwrap();
+        manager.input_api(&db, "s", "pwd\n", false).unwrap();
         manager.input(&db, "s", "ho\r", true).unwrap();
 
         let chunks = db.history_chunks("s", 0, 100).unwrap();
@@ -666,6 +676,72 @@ mod tests {
             .map(|item| item["plain"].as_str().unwrap())
             .collect();
         assert_eq!(inputs, vec!["↑", "make build", "⇥", "^C", "pwd", "echo"]);
+        manager.shutdown(&db);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn api_input_adds_only_missing_line_endings() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        let manager = SessionManager::new();
+        let mut command = CommandBuilder::new("/bin/sleep");
+        command.arg("30");
+        let (mut live, _output) = spawn_terminal(command, 120, 36).unwrap();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        live.input = Arc::new(Mutex::new(Box::new(Capture(captured.clone()))));
+        manager.live.lock().unwrap().insert("s".into(), live);
+
+        for (text, raw, expected) in [
+            ("echo hello", false, "echo hello\n"),
+            ("pwd\n", false, "pwd\n"),
+            ("pwd\r", false, "pwd\r"),
+            ("pwd\r\n", false, "pwd\r\n"),
+            ("printf 'a\nb'", false, "printf 'a\nb'\n"),
+            ("echo 中文", false, "echo 中文\n"),
+            ("", false, "\n"),
+            ("\n", false, "\n"),
+            ("\r", false, "\r"),
+            ("\r\n", false, "\r\n"),
+            ("\x03", true, "\x03"),
+            ("\t", true, "\t"),
+            ("\x1b[A", true, "\x1b[A"),
+            ("ec", true, "ec"),
+            ("", true, ""),
+        ] {
+            captured.lock().unwrap().clear();
+            manager.input_api(&db, "s", text, raw).unwrap();
+            assert_eq!(
+                &*captured.lock().unwrap(),
+                expected.as_bytes(),
+                "text={text:?}, raw={raw}"
+            );
+        }
+
+        let chunks = db.history_chunks("s", 0, 100).unwrap();
+        let plain_inputs: Vec<&str> = chunks["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["direction"] == "input")
+            .map(|item| item["plain"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            plain_inputs,
+            vec![
+                "echo hello",
+                "pwd",
+                "pwd",
+                "pwd",
+                "printf 'a\nb'",
+                "echo 中文",
+                "^C",
+                "⇥",
+                "↑",
+                "ec",
+            ]
+        );
         manager.shutdown(&db);
     }
 
