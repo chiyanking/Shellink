@@ -249,7 +249,7 @@ export function ConnectionsPage() {
 export function IntegrationsPage() {
   const { notify, mcp, refresh } = useDesign()
   const [client, setClient] = useState('Claude Code')
-  const [transport, setTransport] = useState('stdio')
+  const [transport, setTransport] = useState('http')
   const [httpEnabled, setHttpEnabled] = useState(mcp?.httpEnabled ?? false)
   const [busy, setBusy] = useState(false)
   const executable = mcp?.command ?? ''
@@ -328,18 +328,18 @@ export function IntegrationsPage() {
             <span>传输方式</span>
             <div className="small-segments">
               <button
-                className={transport === 'stdio' ? 'is-active' : ''}
-                aria-pressed={transport === 'stdio'}
-                onClick={() => setTransport('stdio')}
-              >
-                stdio
-              </button>
-              <button
                 className={transport === 'http' ? 'is-active' : ''}
                 aria-pressed={transport === 'http'}
                 onClick={() => setTransport('http')}
               >
                 HTTP
+              </button>
+              <button
+                className={transport === 'stdio' ? 'is-active' : ''}
+                aria-pressed={transport === 'stdio'}
+                onClick={() => setTransport('stdio')}
+              >
+                stdio
               </button>
             </div>
           </div>
