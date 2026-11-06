@@ -5,6 +5,7 @@ import {
   Terminal, Workflow,
 } from 'lucide-react'
 import { useDesign, type SettingsTab } from './context'
+import { shortTime } from './data'
 import { Badge, Button, Hint } from './components/ui'
 import { cn } from './lib/utils'
 
@@ -61,7 +62,7 @@ export function ContextPanel() {
           title={`${session.name} · ${session.id}`}
         >
           <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />
-          <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode}</small></span>
+          <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created}</small></span>
           {session.status !== 'ended' && session.mode === 'AUTO' && <Bot size={12} className="context-bot" />}
         </button>
         <Hint label={`复制会话 ID · ${session.id}`}>

@@ -95,7 +95,7 @@ impl DataStore {
     }
     pub fn sessions(&self) -> Result<Value, String> {
         let c = self.conn.lock().unwrap();
-        let mut s = c.prepare("SELECT id,profile_id,profile_name,target,state,mode,cols,rows,created_at,closed_at,close_reason,exit_code,name,source FROM sessions ORDER BY created_at").map_err(|e| e.to_string())?;
+        let mut s = c.prepare("SELECT id,profile_id,profile_name,target,state,mode,cols,rows,created_at,closed_at,close_reason,exit_code,name,source FROM sessions ORDER BY created_at DESC, rowid DESC").map_err(|e| e.to_string())?;
         let rows = s.query_map([], |r| Ok(json!({"id":r.get::<_,String>(0)?,"profileId":r.get::<_,String>(1)?,"profileName":r.get::<_,String>(2)?,"target":r.get::<_,String>(3)?,"state":r.get::<_,String>(4)?,"mode":r.get::<_,String>(5)?,"cols":r.get::<_,i64>(6)?,"rows":r.get::<_,i64>(7)?,"createdAt":r.get::<_,i64>(8)?,"closedAt":r.get::<_,Option<i64>>(9)?,"closeReason":r.get::<_,Option<String>>(10)?,"exitCode":r.get::<_,Option<i64>>(11)?,"name":r.get::<_,String>(12)?,"source":r.get::<_,String>(13)?,"active":r.get::<_,String>(4)? != "DISCONNECTED"}))).map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         for row in rows {
@@ -1115,6 +1115,24 @@ mod tests {
         let again = db.session_state("stale-1").unwrap();
         assert_eq!(again["active"], false);
         assert_eq!(again["closeReason"], "App exited without cleanup");
+    }
+
+    #[test]
+    fn sessions_list_is_newest_first() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("old", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        db.insert_session("new", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        let list = db.sessions().unwrap();
+        let ids: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["new", "old"]);
     }
 
     #[test]

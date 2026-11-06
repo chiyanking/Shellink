@@ -8,6 +8,15 @@ export const sessionStatus: Record<SessionStatus, { label: string; tone: 'green'
 export const emptyConnection: Connection = { id: '', name: '暂无连接', host: '', user: '', group: 'Local', type: 'Local', color: 'green', connected: false, system: '', port: 0 }
 export const emptySession: Session = { id: '', connectionId: '', name: '暂无会话', status: 'ended', source: '未知', client: '未标记来源', mode: 'AUTO', created: '', updated: '', duration: '', command: '', result: '' }
 export const dateText = (at: number) => new Date(at).toLocaleString('sv-SE')
+/** 紧凑时间: 当天显示 HH:MM, 更早显示 MM-DD HH:MM, 往年显示 YYYY-MM-DD */
+export function shortTime(at: number) {
+  const date = new Date(at)
+  const now = new Date()
+  const hm = date.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+  if (date.toDateString() === now.toDateString()) return hm
+  const ymd = date.toLocaleDateString('sv-SE', { month: '2-digit', day: '2-digit' })
+  return date.getFullYear() === now.getFullYear() ? `${ymd} ${hm}` : date.toLocaleDateString('sv-SE')
+}
 export function connectionFrom(profile: Profile, sessions: SessionRecord[]): Connection {
   const local = profile.connectType === 'command'
   return { id: profile.id, name: profile.name, host: local ? 'localhost' : profile.host, user: local ? '' : profile.username, port: profile.port, group: preference(`group.${profile.id}`, local ? 'Local' : 'Development'), type: local ? 'Local' : 'SSH', color: local ? 'green' : 'blue', connected: sessions.some(s => s.profileId === profile.id && s.active), system: local ? profile.command ?? '' : 'SSH', command: profile.command ?? '', profile }
