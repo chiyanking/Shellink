@@ -71,6 +71,7 @@ function TerminalContent({ session }: { session: Session }) {
   useEffect(() => {
     if (!host.current || !session.id || readyFont !== fontDescriptor) return
     let alive = true
+    const frame = host.current.closest<HTMLElement>('.terminal-frame')
     const terminal = new XTerm({
       convertEol: true,
       cursorBlink: true,
@@ -99,6 +100,14 @@ function TerminalContent({ session }: { session: Session }) {
       const cols = Math.max(20, Math.min(500, size.cols))
       const rows = Math.max(5, Math.min(200, size.rows))
       if (terminal.cols !== cols || terminal.rows !== rows) terminal.resize(cols, rows)
+      const screen = terminal.element?.querySelector<HTMLElement>('.xterm-screen')
+      if (screen) {
+        const availableHeight = Number.parseFloat(getComputedStyle(host.current).height)
+        const screenHeight = Number.parseFloat(screen.style.height)
+        // Keep the first row fixed; the status bar absorbs only the unused row fraction.
+        const remainder = Math.max(0, availableHeight - screenHeight)
+        if (Number.isFinite(remainder)) frame?.style.setProperty('--terminal-row-remainder', `${remainder}px`)
+      }
       if (control.current.active && (cols !== sentCols || rows !== sentRows)) {
         sentCols = cols; sentRows = rows
         void rpc('sessions.resize', { id: session.id, cols, rows }).catch(() => {})
@@ -146,7 +155,7 @@ function TerminalContent({ session }: { session: Session }) {
       replaying = false
       buffered.sort((a, b) => a.seq - b.seq).forEach(item => { if (item.seq > replaySeq) { write(item.raw); replaySeq = item.seq } })
     })().catch(error => { if (alive) notify(String(error)) })
-    return () => { alive = false; dispose?.(); resizeObserver.disconnect(); cancelAnimationFrame(resizeFrame); input.dispose(); terminal.dispose() }
+    return () => { alive = false; dispose?.(); resizeObserver.disconnect(); cancelAnimationFrame(resizeFrame); frame?.style.removeProperty('--terminal-row-remainder'); input.dispose(); terminal.dispose() }
   }, [session.id, font, fontSize, fontDescriptor, readyFont, coreEpoch, notify, colorScheme])
   return <div className="terminal-output xterm-host" aria-label={`${session.name} 终端`}><div ref={host} className="terminal-viewport" /></div>
 }

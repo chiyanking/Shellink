@@ -276,8 +276,9 @@
 .terminal-encoding { flex-shrink: 0; color: var(--subtle-foreground); font: 9px var(--font-mono); }
 .terminal-session-meta > .ui-button { flex-shrink: 0; width: 24px; height: 24px; color: var(--muted-foreground); }
 .terminal-session-meta > .ui-button:hover { color: var(--foreground); background: var(--surface-hover); }
-.terminal-viewport { inset: 4px 0 0 6px; }
-.terminal-bottom { min-height: 30px; height: 30px; background: var(--terminal-header); color: #727d93; border-top: 1px solid #171c28; padding: 0 12px; font: 9px var(--font-mono); }
+.terminal-viewport { inset: 2px 0 2px 6px; }
+/* Let the status bar cover the unused fraction of a terminal row without moving the screen. */
+.terminal-bottom { position: relative; min-height: 30px; height: calc(30px + var(--terminal-row-remainder, 0px)); margin-top: calc(-1 * var(--terminal-row-remainder, 0px)); background: var(--terminal-header); color: #727d93; border-top: 1px solid #171c28; padding: 0 12px; font: 9px var(--font-mono); }
 .terminal-history-link { display: flex; align-items: center; gap: 5px; border: 0; background: transparent; color: #939db4; font-size: 9px; padding: 0; }
 .terminal-history-link:hover { color: #d4ccff; }
 .terminal-latency { color: #727d93; }

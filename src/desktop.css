@@ -1343,7 +1343,7 @@ select {
 /* FitAddon measures this unpadded box, excluding the outer gutter. */
 .terminal-viewport {
   position: absolute;
-  inset: 4px 0 0 6px;
+  inset: 2px 0 2px 6px;
 }
 .terminal-viewport > .xterm {
   height: 100%;
