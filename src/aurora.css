@@ -344,8 +344,6 @@
 /* Management pages share the same surfaces and selected states. */
 .integration-layout { grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; }
 .integration-setup { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: 22px; }
-.integration-methods { margin-bottom: 20px; }
-.integration-methods > button.is-active { border-radius: 8px; border-color: transparent; background: var(--gradient-soft); }
 .step-number { color: var(--primary-text); background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 25%, transparent); }
 .client-choice { border-radius: 9px; background: var(--surface-raised); }
 .client-choice.is-active { border-color: var(--primary); background: var(--primary-soft); box-shadow: var(--accent-shadow); }

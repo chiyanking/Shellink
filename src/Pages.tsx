@@ -142,15 +142,10 @@ export function IntegrationsPage() {
           本地 MCP
         </Badge>
       </PageHeading>
-      <div className="integration-methods" aria-label="接入方式">
-        <button
-          className="is-active"
-          aria-pressed="true"
-        >
-          <Workflow size={16} />
-          <span>Desktop MCP</span>
-          <Badge tone="blue">推荐</Badge>
-        </button>
+      <div className="integration-method" aria-label="接入方式">
+        <Workflow size={16} />
+        <span>Desktop MCP</span>
+        <Badge tone="blue">推荐</Badge>
       </div>
       <div className="integration-layout">
         <section className="integration-setup">

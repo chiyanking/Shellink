@@ -1824,28 +1824,20 @@ select {
 }
 
 /* AI integrations */
-.integration-methods {
-  display: flex;
-  gap: 25px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 27px;
-}
-.integration-methods > button {
-  display: flex;
+.integration-method {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  padding: 0 0 13px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-.integration-methods > button.is-active {
-  border-bottom-color: var(--primary);
+  margin-bottom: 20px;
+  padding: 8px 12px;
+  border: 1px solid var(--primary-border);
+  border-radius: 8px;
+  background: var(--primary-soft);
   color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
 }
-.integration-methods > button.is-active > svg {
+.integration-method > svg {
   color: var(--primary-text);
 }
 .integration-layout {
