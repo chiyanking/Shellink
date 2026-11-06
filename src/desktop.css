@@ -123,6 +123,8 @@ textarea {
   font: inherit;
 }
 button {
+  -webkit-appearance: none;
+  appearance: none;
   cursor: pointer;
 }
 button,
@@ -276,9 +278,7 @@ select {
 .ui-button-default {
   color: var(--primary-foreground);
   background: var(--primary);
-  box-shadow:
-    0 1px 2px #00000014,
-    inset 0 1px #ffffff18;
+  box-shadow: none;
 }
 .ui-button-default:hover {
   background: var(--primary-hover);

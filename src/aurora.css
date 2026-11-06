@@ -26,7 +26,7 @@
   --ring: #8174ff;
   --gradient: linear-gradient(120deg, #6a5cff, #0ea8d9);
   --gradient-soft: linear-gradient(120deg, #6a5cff1f, #0ea8d91a);
-  --accent-shadow: 0 0 0 1px #6a5cff30, 0 4px 18px #6a5cff1a;
+  --accent-shadow: none;
   --shadow-float: 0 10px 30px #2a335024, 0 2px 6px #2a335014;
   --terminal: #0d1017;
   --terminal-canvas: #0d1017;
@@ -67,7 +67,7 @@
   --ring: #a297ff;
   --gradient: linear-gradient(120deg, #7c6cff, #3fd0f0);
   --gradient-soft: linear-gradient(120deg, #7c6cff2b, #3fd0f020);
-  --accent-shadow: 0 0 0 1px #7c6cff38, 0 0 20px #7c6cff1c;
+  --accent-shadow: none;
   --shadow-float: 0 8px 28px #00000059;
   --terminal: #05060a;
   --terminal-canvas: #05060a;
