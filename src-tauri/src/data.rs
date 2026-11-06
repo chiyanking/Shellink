@@ -499,59 +499,6 @@ impl DataStore {
         }
         Ok(json!({"raw":raw,"cursor":cursor}))
     }
-    pub fn webhooks(&self) -> Result<Value, String> {
-        let c = self.conn.lock().unwrap();
-        let mut statement = c
-            .prepare("SELECT id,url,events,created_at FROM webhooks ORDER BY created_at")
-            .map_err(|e| e.to_string())?;
-        let rows = statement.query_map([], |r| {
-            let events = serde_json::from_str::<Value>(&r.get::<_, String>(2)?).unwrap_or_else(|_| json!([]));
-            Ok(json!({"id":r.get::<_,String>(0)?,"url":r.get::<_,String>(1)?,"events":events,"createdAt":r.get::<_,i64>(3)?}))
-        }).map_err(|e| e.to_string())?;
-        rows.map(|row| row.map_err(|e| e.to_string()).map(|v| v))
-            .collect()
-    }
-    pub fn webhook_create(&self, params: &Value) -> Result<Value, String> {
-        let url = params
-            .get("url")
-            .and_then(Value::as_str)
-            .filter(|v| v.starts_with("http://") || v.starts_with("https://"))
-            .ok_or("url must be a valid HTTP or HTTPS URL")?;
-        if url.contains(char::is_whitespace) {
-            return Err("url must be a valid HTTP or HTTPS URL".into());
-        }
-        let events = params.get("events").cloned().unwrap_or_else(|| json!([]));
-        let Some(items) = events.as_array() else {
-            return Err("events must be an array".into());
-        };
-        if items.iter().any(|item| {
-            !matches!(
-                item.as_str(),
-                Some("state") | Some("closed") | Some("loginExternal")
-            )
-        }) {
-            return Err("events must contain state, closed, or loginExternal".into());
-        }
-        let id = format!("webhook-{}", now());
-        let created = now();
-        let c = self.conn.lock().unwrap();
-        c.execute(
-            "INSERT INTO webhooks (id,url,events,created_at) VALUES (?,?,?,?)",
-            rusqlite::params![id, url, events.to_string(), created],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(json!({"id":id,"url":url,"events":events,"createdAt":created}))
-    }
-    pub fn webhook_delete(&self, id: &str) -> Result<Value, String> {
-        let c = self.conn.lock().unwrap();
-        if c.execute("DELETE FROM webhooks WHERE id=?", [id])
-            .map_err(|e| e.to_string())?
-            == 0
-        {
-            return Err("Webhook not found".into());
-        }
-        Ok(json!({"ok":true}))
-    }
     pub fn profile_create(&self, p: &Value) -> Result<Value, String> {
         let name = p
             .get("name")
@@ -811,7 +758,7 @@ fn ensure_private_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|e| format!("创建数据目录失败: {e}"))
 }
 fn initialize_schema(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY,name TEXT NOT NULL,unique_id TEXT,connect_type TEXT NOT NULL DEFAULT 'ssh',command TEXT,host TEXT NOT NULL DEFAULT '',port INTEGER NOT NULL DEFAULT 22,username TEXT NOT NULL DEFAULT '',auth_type TEXT NOT NULL DEFAULT 'password',encrypted_password TEXT,encrypted_private_key TEXT,encrypted_passphrase TEXT,term TEXT NOT NULL DEFAULT 'xterm-256color',cols INTEGER NOT NULL DEFAULT 160,rows INTEGER NOT NULL DEFAULT 42,prompt_regex TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY,profile_id TEXT NOT NULL,profile_name TEXT NOT NULL,target TEXT NOT NULL,state TEXT NOT NULL,mode TEXT NOT NULL DEFAULT 'AUTO',cols INTEGER NOT NULL,rows INTEGER NOT NULL,created_at INTEGER NOT NULL,closed_at INTEGER,close_reason TEXT,exit_code INTEGER,name TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT 'unknown'); CREATE TABLE IF NOT EXISTS history_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL,seq INTEGER NOT NULL,direction TEXT NOT NULL,data_raw TEXT NOT NULL,data_plain TEXT NOT NULL,internal INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS webhooks (id TEXT PRIMARY KEY,url TEXT NOT NULL,events TEXT NOT NULL DEFAULT '[]',created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_unique_id ON profiles(unique_id) WHERE unique_id IS NOT NULL; CREATE INDEX IF NOT EXISTS idx_history_session_seq ON history_chunks(session_id,seq);").map_err(|e|e.to_string())
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY,name TEXT NOT NULL,unique_id TEXT,connect_type TEXT NOT NULL DEFAULT 'ssh',command TEXT,host TEXT NOT NULL DEFAULT '',port INTEGER NOT NULL DEFAULT 22,username TEXT NOT NULL DEFAULT '',auth_type TEXT NOT NULL DEFAULT 'password',encrypted_password TEXT,encrypted_private_key TEXT,encrypted_passphrase TEXT,term TEXT NOT NULL DEFAULT 'xterm-256color',cols INTEGER NOT NULL DEFAULT 160,rows INTEGER NOT NULL DEFAULT 42,prompt_regex TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY,profile_id TEXT NOT NULL,profile_name TEXT NOT NULL,target TEXT NOT NULL,state TEXT NOT NULL,mode TEXT NOT NULL DEFAULT 'AUTO',cols INTEGER NOT NULL,rows INTEGER NOT NULL,created_at INTEGER NOT NULL,closed_at INTEGER,close_reason TEXT,exit_code INTEGER,name TEXT NOT NULL DEFAULT '',source TEXT NOT NULL DEFAULT 'unknown'); CREATE TABLE IF NOT EXISTS history_chunks (id INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL,seq INTEGER NOT NULL,direction TEXT NOT NULL,data_raw TEXT NOT NULL,data_plain TEXT NOT NULL,internal INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_unique_id ON profiles(unique_id) WHERE unique_id IS NOT NULL; CREATE INDEX IF NOT EXISTS idx_history_session_seq ON history_chunks(session_id,seq);").map_err(|e|e.to_string())
 }
 fn decode_key(raw: &str) -> Result<[u8; 32], String> {
     if raw.len() != 64 {

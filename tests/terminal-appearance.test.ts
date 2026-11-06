@@ -3,17 +3,17 @@ import { test } from 'node:test'
 import { createCommandHighlighter, terminalTheme } from '../src/terminal-appearance.ts'
 
 const RESET = '\x1b[0m'
-const DARK_COMMAND = '\x1b[1;38;2;210;214;224m'
-const DARK_PROMPT = '\x1b[38;2;143;206;179m'
-const DARK_PATH = '\x1b[38;2;147;172;244m'
+const DARK_COMMAND = '\x1b[1;38;2;238;241;248m'
+const DARK_PROMPT = '\x1b[38;2;61;220;151m'
+const DARK_PATH = '\x1b[38;2;124;157;255m'
 
 test('dark and light themes use their own canvas instead of a stale CSS variable', () => {
-  assert.equal(terminalTheme('dark').background, '#121317')
-  assert.equal(terminalTheme('dark').foreground, '#aeb4c1')
-  assert.equal(terminalTheme('light').background, '#ffffff')
-  assert.equal(terminalTheme('light').foreground, '#50596a')
-  assert.equal(terminalTheme('dark').green, '#8fceb3')
-  assert.equal(terminalTheme('dark').brightWhite, '#eef0f6')
+  assert.equal(terminalTheme('dark').background, '#05060a')
+  assert.equal(terminalTheme('dark').foreground, '#b7bfd0')
+  assert.equal(terminalTheme('light').background, '#0d1017')
+  assert.equal(terminalTheme('light').foreground, '#b7bfd0')
+  assert.equal(terminalTheme('dark').green, '#3ddc97')
+  assert.equal(terminalTheme('dark').brightWhite, '#eef1f8')
 })
 
 test('replay separates prompt, command, and output by colour', () => {

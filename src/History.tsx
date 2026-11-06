@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownToLine, ArrowUpRight, FileClock, Search } from 'lucide-react'
 import { rpc, type HistoryChunk } from './backend'
 import { useDesign } from './context'
-import { Badge, Button, Input, Select } from './components/ui'
+import { Badge, Button, Input } from './components/ui'
 import { PageHeading } from './Workspace'
 
 type ChunkPage = { items: HistoryChunk[]; cursor: number; hasMore: boolean }
@@ -53,7 +53,6 @@ export default function HistoryPage() {
     <div className="history-session-scope">
       <span className="history-source-icon"><FileClock size={18} /></span>
       <div><strong>{selectedSession?.name ?? '选择一个会话'}</strong><span>{selectedSession ? `${sessionId} · ${connections.find(item => item.id === selectedSession.connectionId)?.name ?? '已删除连接'}` : '历史按 session 分开保存'}</span></div>
-      <Select label="历史记录所属会话" value={sessionId} onChange={setSessionId} options={[{ value: 'all', label: '选择会话' }, ...sessions.map(session => ({ value: session.id, label: `${session.name} · ${session.id}` }))]} />
       {selectedSession && <Button variant="ghost" size="sm" onClick={() => inspectSession(selectedSession.id)}>会话详情</Button>}
     </div>
     <div className="history-toolbar"><label className="search-input"><Search size={14} /><Input aria-label="搜索历史片段" placeholder="搜索输入或终端输出…" value={search} onChange={event => setSearch(event.target.value)} /></label></div>

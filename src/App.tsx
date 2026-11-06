@@ -1,46 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
-  ArrowUpDown,
   ArrowUpRight,
-  Box,
   Check,
-  ChevronDown,
-  ChevronRight,
-  CircleHelp,
-  FileClock,
   Keyboard,
-  Laptop,
-  LayoutGrid,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Search,
   Server,
-  Settings2,
   ShieldCheck,
   Sun,
   Terminal,
   PanelsTopLeft,
-  Workflow,
   X,
 } from 'lucide-react'
-import { Design, type Modal } from './context'
+import { Design, type AIClient, type ConnectionFilter, type Modal, type SettingsTab } from './context'
 import { connectionFrom, sessionFrom, emptyConnection, emptySession, type Connection, type Page, type Session } from './data'
-import { rpc, onCoreEvent, errorText, preference, savePreference, type Profile, type SessionRecord, type RuntimeInfo, type MCPInfo, type CallbackRecord } from './backend'
-import { Badge, Button, Dialog, Hint, Input, Menu, Select, TooltipProvider } from './components/ui'
+import { rpc, onCoreEvent, errorText, preference, savePreference, type Profile, type SessionRecord, type RuntimeInfo, type MCPInfo } from './backend'
+import { Button, Dialog, Hint, Input, Select, TooltipProvider } from './components/ui'
 import { cn } from './lib/utils'
 import Workspace from './Workspace'
 import { ConnectionsPage, HistoryPage, IntegrationsPage, SettingsPage } from './Pages'
 import SshAuth from './SshAuth'
+import { ContextPanel, NavigationRail, navigation } from './Navigation'
 
-const navigation = [
-  { id: 'workspace', label: '工作台', icon: LayoutGrid, shortcut: '1' },
-  { id: 'connections', label: '连接管理', icon: Server, shortcut: '2' },
-  { id: 'integrations', label: 'AI 接入', icon: Workflow, shortcut: '3' },
-  { id: 'history', label: '历史记录', icon: FileClock, shortcut: '4' },
-] as const
 const pageNames: Record<Page, string> = {
   workspace: '终端工作区',
   connections: '连接管理',
@@ -55,16 +40,14 @@ export default function App() {
   const [connections, setConnections] = useState<Connection[]>([])
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
   const [mcp, setMcp] = useState<MCPInfo | null>(null)
-  const [messages, setMessages] = useState<CallbackRecord[]>([])
   const [coreEpoch, setCoreEpoch] = useState(0)
   const [coreReady, setCoreReady] = useState(false)
   const readyRef = useRef(false)
   const [backendError, setBackendError] = useState('')
   const [loading, setLoading] = useState(true)
-  const [selectedSessionId, setSelectedSessionId] = useState(() => preference('selectedSession', ''))
+  const [selectedSessionId, setSelectedSessionId] = useState(() => preference('restore', true) ? preference('selectedSession', '') : '')
   const [historyScope, setHistoryScope] = useState<{ sessionId?: string; eventId?: string }>({})
-  const [tabs, setTabs] = useState<string[]>(() => preference('restore', true) ? preference('tabs', []) : [])
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => preference('theme', 'light'))
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => preference('theme', 'dark'))
   const [font, setFont] = useState(() => preference('font', 'JetBrains Mono'))
   const [fontSize, setFontSize] = useState(() => preference('fontSize', '13'))
   const [sidebar, setSidebar] = useState(() => !window.matchMedia('(max-width: 580px)').matches)
@@ -72,7 +55,10 @@ export default function App() {
   const [modal, setModal] = useState<Modal>(null)
   const [toast, setToast] = useState('')
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [collapsed, setCollapsed] = useState<string[]>([])
+  const [connectionFilter, setConnectionFilter] = useState<ConnectionFilter>('all')
+  const [connectionGroupFilter, setConnectionGroupFilter] = useState('all')
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
+  const [client, setClient] = useState<AIClient>('Claude Code')
   const [commandQuery, setCommandQuery] = useState('')
   const [newSessionId, setNewSessionId] = useState('')
   const [newSessionName, setNewSessionName] = useState('')
@@ -82,7 +68,7 @@ export default function App() {
   const [editingId, setEditingId] = useState('')
   const [saving, setSaving] = useState(false)
   const [importText, setImportText] = useState('')
-  const selectedSession = sessions.find(item => item.id === selectedSessionId) ?? sessions.find(item => tabs.includes(item.id)) ?? emptySession
+  const selectedSession = sessions.find(item => item.id === selectedSessionId) ?? emptySession
   const selected = connections.find(item => item.id === selectedSession.connectionId) ?? emptyConnection
   const manual = selectedSession.mode === 'MANUAL'
   const activeSessionCount = sessions.filter(item => item.status !== 'ended').length
@@ -96,15 +82,14 @@ export default function App() {
     if (refreshBusy.current) return
     refreshBusy.current = true
     try {
-      const [info, profiles, records, mcpInfo, callbacks] = await Promise.all([
-        rpc<RuntimeInfo>('desktop.info'), rpc<Profile[]>('profiles.list'), rpc<SessionRecord[]>('sessions.list'), rpc<MCPInfo>('mcp.info'), rpc<CallbackRecord[]>('webhooks.messages'),
+      const [info, profiles, records, mcpInfo] = await Promise.all([
+        rpc<RuntimeInfo>('desktop.info'), rpc<Profile[]>('profiles.list'), rpc<SessionRecord[]>('sessions.list'), rpc<MCPInfo>('mcp.info'),
       ])
       const mapped = profiles.map(profile => connectionFrom(profile, records))
       for (const record of records) {
         if (!mapped.some(item => item.id === record.profileId)) mapped.push({ ...emptyConnection, id: record.profileId, name: record.profileName || '已删除连接', host: record.target, archived: true })
       }
-      setRuntime(info); setConnections(mapped); setSessions(records.map(sessionFrom)); setMcp(mcpInfo); setMessages(callbacks); if (readyRef.current) setBackendError('')
-      setTabs(current => current.filter(id => records.some(record => record.id === id)))
+      setRuntime(info); setConnections(mapped); setSessions(records.map(sessionFrom)); setMcp(mcpInfo); if (readyRef.current) setBackendError('')
       setNewSessionId(current => profiles.some(p => p.id === current) ? current : profiles[0]?.id ?? '')
     } catch (error) { setBackendError(errorText(error)) } finally { setLoading(false); refreshBusy.current = false }
   }, [])
@@ -133,7 +118,7 @@ export default function App() {
     setLoading(true); setCoreReady(false); readyRef.current = false
     setBackendError(''); setCoreEpoch(epoch => epoch + 1)
   }
-  useEffect(() => { savePreference('tabs', tabs); savePreference('selectedSession', selectedSessionId) }, [tabs, selectedSessionId])
+  useEffect(() => { savePreference('selectedSession', selectedSessionId); localStorage.removeItem('shellink.tabs') }, [selectedSessionId])
   useEffect(() => { savePreference('theme', theme); document.documentElement.classList.toggle('dark', theme === 'dark') }, [theme])
   useEffect(() => { savePreference('font', font); savePreference('fontSize', fontSize) }, [font, fontSize])
   const navigate = useCallback((next: Page) => {
@@ -142,13 +127,13 @@ export default function App() {
   }, [])
   const openSession = useCallback((id: string) => {
     if (!sessions.some(item => item.id === id)) return
-    setSelectedSessionId(id); setTabs(current => current.includes(id) ? current : [...current, id]); navigate('workspace')
+    setSelectedSessionId(id); navigate('workspace')
   }, [sessions, navigate])
   async function createSession(connectionId: string, name = '') {
     setSaving(true)
     try {
       const created = await rpc<{ id: string }>('sessions.create', { profileId: connectionId, name: name.trim(), source: 'desktop', mode: 'MANUAL' })
-      await refresh(); setSelectedSessionId(created.id); setTabs(current => [...new Set([...current, created.id])]); navigate('workspace'); setNewSessionName(''); setModal(null)
+      await refresh(); setSelectedSessionId(created.id); navigate('workspace'); setNewSessionName(''); setModal(null)
     } catch (error) { notify(errorText(error)) } finally { setSaving(false) }
   }
   function openConnection(id: string) {
@@ -161,7 +146,6 @@ export default function App() {
     try { await rpc('sessions.mode', { id, mode: value ? 'MANUAL' : 'AUTO' }); await refresh() } catch (error) { notify(errorText(error)) }
   }
   function setManual(value: boolean) { if (selectedSession.id) void setSessionManual(selectedSession.id, value) }
-  function closeTab(id: string) { const next = tabs.filter(tab => tab !== id); setTabs(next); if (selectedSessionId === id) setSelectedSessionId(next[0] ?? '') }
   function editConnection(id: string) {
     const profile = connections.find(item => item.id === id)?.profile
     if (!profile) return
@@ -191,7 +175,8 @@ export default function App() {
   return (
     <Design.Provider
       value={{
-        coreEpoch, coreReady, connections, runtime, mcp, messages, refresh, editConnection, deleteConnection, font, fontSize, setFont, setFontSize,
+        coreEpoch, coreReady, connections, runtime, mcp, refresh, editConnection, deleteConnection, font, fontSize, setFont, setFontSize,
+        connectionFilter, setConnectionFilter, connectionGroup: connectionGroupFilter, setConnectionGroup: setConnectionGroupFilter, settingsTab, setSettingsTab, client, setClient,
         page,
         navigate,
         selected,
@@ -203,13 +188,11 @@ export default function App() {
         inspectHistory,
         setSessionManual,
         openConnection,
-        tabs,
-        closeTab,
         manual,
         setManual,
         split,
         setSplit,
-        openModal: setModal,
+        openModal: (next) => { if (next === 'commands') setCommandQuery(''); setModal(next) },
         notify,
         theme,
         setTheme,
@@ -218,169 +201,8 @@ export default function App() {
       <TooltipProvider delayDuration={350}>
         <div className={cn('desktop-shell', !sidebar && 'sidebar-hidden')}>
           <div className="desktop-body">
-            <aside className="app-sidebar" aria-label="工作区导航">
-              <Menu
-                align="start"
-                trigger={
-                  <button className="workspace-switcher">
-                    <span className="brand-mark">
-                      <Terminal size={15} strokeWidth={2.6} />
-                    </span>
-                    <span>
-                      <strong>Shellink</strong>
-                      <small>个人工作区</small>
-                    </span>
-                    <ArrowUpDown size={13} />
-                  </button>
-                }
-                items={[
-                  { label: '个人工作区', icon: <Box size={14} />, checked: true },
-                  {
-                    label: '工作区设置',
-                    icon: <Settings2 size={14} />,
-                    onSelect: () => navigate('settings'),
-                  },
-                ]}
-              />
-              <nav className="main-navigation" aria-label="主导航">
-                {navigation.map((item) => (
-                  <button
-                    key={item.id}
-                    className={cn('main-nav-item', page === item.id && 'is-active')}
-                    aria-current={page === item.id ? 'page' : undefined}
-                    onClick={() => navigate(item.id)}
-                  >
-                    <item.icon size={16} />
-                    <span>{item.label}</span>
-                    {item.id === 'workspace' ? (
-                      <Badge>{tabs.length}</Badge>
-                    ) : (
-                      <kbd>⌘{item.shortcut}</kbd>
-                    )}
-                  </button>
-                ))}
-              </nav>
-              <div className="sidebar-divider" />
-              <div className="sidebar-section-heading">
-                <span>我的连接</span>
-                <Hint label="新建连接">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="新建连接"
-                    onClick={() => setModal('connection')}
-                  >
-                    <Plus size={14} />
-                  </Button>
-                </Hint>
-              </div>
-              <div className="sidebar-connections">
-                {[...new Set(['Production', 'Development', 'Local', ...connections.filter(c => !c.archived).map(c => c.group)])].map((group) => (
-                  <section className="connection-group" key={group}>
-                    <button
-                      className="connection-group-heading"
-                      aria-expanded={!collapsed.includes(group)}
-                      onClick={() =>
-                        setCollapsed((current) =>
-                          current.includes(group)
-                            ? current.filter((value) => value !== group)
-                            : [...current, group],
-                        )
-                      }
-                    >
-                      <ChevronDown
-                        size={12}
-                        className={collapsed.includes(group) ? 'is-collapsed' : ''}
-                      />
-                      <span>{group}</span>
-                      <span>
-                        {connections.filter((connection) => connection.group === group && !connection.archived).length}
-                      </span>
-                    </button>
-                    {!collapsed.includes(group) &&
-                      connections
-                        .filter((connection) => connection.group === group && !connection.archived)
-                        .map((connection) => (
-                          <button
-                            key={connection.id}
-                            className={cn(
-                              'sidebar-connection',
-                              page === 'workspace' &&
-                                tabs.length > 0 &&
-                                selected.id === connection.id &&
-                                'is-active',
-                            )}
-                            onClick={() => openConnection(connection.id)}
-                            aria-pressed={
-                              page === 'workspace' &&
-                              tabs.length > 0 &&
-                              selected.id === connection.id
-                            }
-                          >
-                            <span
-                              className={cn('sidebar-connection-icon', `color-${connection.color}`)}
-                            >
-                              {connection.type === 'Local' ? (
-                                <Laptop size={14} />
-                              ) : (
-                                <Server size={14} />
-                              )}
-                            </span>
-                            <span>{connection.name}</span>
-                            {sessions.some(
-                              (session) =>
-                                session.connectionId === connection.id &&
-                                session.status !== 'ended',
-                            ) && <span className="status-dot" />}
-                          </button>
-                        ))}
-                  </section>
-                ))}
-              </div>
-              <div className="sidebar-bottom">
-                <button
-                  className="sidebar-quick-open"
-                  onClick={() => {
-                    setCommandQuery('')
-                    setModal('commands')
-                  }}
-                >
-                  <Search size={13} />
-                  <span>快速访问</span>
-                  <kbd>⌘ K</kbd>
-                </button>
-                <button
-                  className={cn('main-nav-item', page === 'settings' && 'is-active')}
-                  onClick={() => navigate('settings')}
-                  aria-current={page === 'settings' ? 'page' : undefined}
-                >
-                  <Settings2 size={16} />
-                  <span>设置</span>
-                </button>
-                <div className="sidebar-user">
-                  <span className="user-avatar">Y</span>
-                  <div>
-                    <strong>本地工作区</strong>
-                    <span>
-                      <ShieldCheck size={10} />
-                      仅在你的设备上
-                    </span>
-                  </div>
-                  <Hint label="后台连接信息">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="后台连接信息"
-                      onClick={() =>
-                        notify(runtime ? `后台 PID ${runtime.status.pid} · ${runtime.dataHome}` : backendError || '正在连接后台…')
-                      }
-                    >
-                      <CircleHelp size={15} />
-                    </Button>
-                  </Hint>
-                </div>
-              </div>
-            </aside>
+            <NavigationRail />
+            <ContextPanel />
             <main className="app-main">
               <header className="main-topbar">
                 <div className="breadcrumbs">
@@ -394,23 +216,15 @@ export default function App() {
                       {sidebar ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
                     </Button>
                   </Hint>
-                  <span className="breadcrumb-divider" />
-                  <span>工作区</span>
-                  <ChevronRight size={12} />
-                  <strong>{pageNames[page]}</strong>
+                  <div className="topbar-title">
+                    <strong>{navigation.find(item => item.id === page)?.title ?? 'Preferences'}</strong>
+                    <span>Shellink / {pageNames[page]}</span>
+                  </div>
                 </div>
+                <button className="command-search" onClick={() => { setCommandQuery(''); setModal('commands') }}>
+                  <Search size={13} /><span>搜索或输入命令…</span><kbd>⌘ K</kbd>
+                </button>
                 <div className="topbar-actions">
-                  <button
-                    className="command-search"
-                    onClick={() => {
-                      setCommandQuery('')
-                      setModal('commands')
-                    }}
-                  >
-                    <Search size={13} />
-                    <span>搜索命令或连接…</span>
-                    <kbd>⌘ K</kbd>
-                  </button>
                   <Hint label={theme === 'dark' ? '切换浅色外观' : '切换深色外观'}>
                     <Button
                       variant="ghost"
@@ -421,14 +235,14 @@ export default function App() {
                       {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
                     </Button>
                   </Hint>
-                  <span className="topbar-preview">
+                  <span className={cn("topbar-preview", backendError && "is-offline", loading && "is-loading")}>
                     <span className="status-dot" />
-                    {backendError ? '连接中断' : loading ? '连接中' : 'Desktop 已连接'}
+                    {backendError ? '未连接' : loading ? '连接中' : `${activeSessionCount} LIVE`}
                   </span>
                 </div>
               </header>
+              {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接 Desktop 核心'}</strong><p>{backendError || '正在初始化本地 Rust 核心。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
               <div className={cn('main-scroll', page === 'workspace' && 'workspace-scroll')} data-ui-scroll-container>
-                {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接 Desktop 核心'}</strong><p>{backendError || '正在初始化本地 Rust 核心。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
                 <div className="workspace-slot" hidden={page !== 'workspace'}><Workspace /></div>
                 {page === 'connections' && <ConnectionsPage />}
                 {page === 'integrations' && <IntegrationsPage />}
@@ -443,7 +257,7 @@ export default function App() {
           </div>
           <footer className="app-statusbar">
             <div>
-              <span className="status-dot" />
+              <span className={cn("status-dot", !coreReady && "is-offline")} />
               <span>本地工作区</span>
               <span className="status-separator">|</span>
               <button className="statusbar-session-link" onClick={() => navigate('workspace')}>
@@ -594,6 +408,7 @@ export default function App() {
             />
           </label>
           <div className="session-picker">
+            {!connections.some(connection => !connection.archived) && <div className="session-picker-empty"><Server size={24} /><strong>先添加一个连接</strong><p>添加 SSH 主机或本地 Shell，再创建终端会话。</p><Button variant="outline" onClick={() => setModal('connection')}><Plus size={13} />添加连接</Button></div>}
             {connections.filter(c => !c.archived).map((connection) => (
               <button
                 key={connection.id}

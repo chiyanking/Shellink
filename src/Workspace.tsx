@@ -6,25 +6,24 @@ import '@xterm/xterm/css/xterm.css'
 import {
   ArrowRight,
   Bot,
-  Copy,
   Ellipsis,
-  FolderOpen,
   Hand,
   History,
   Keyboard,
   PanelsTopLeft,
   Plus,
   Radio,
+  Server,
+  Workflow,
   ShieldCheck,
   SquareSplitHorizontal,
   Terminal,
-  X,
 } from 'lucide-react'
 import { useDesign } from './context'
 import { createCommandHighlighter, terminalTheme } from './terminal-appearance'
 import { emptyConnection, sessionStatus, type Session } from './data'
 import { onCoreEvent, rpc } from './backend'
-import { Badge, Button, Hint, Menu } from './components/ui'
+import { Badge, Button, Menu } from './components/ui'
 import { cn } from './lib/utils'
 import { createTerminalInput } from './terminal-input'
 
@@ -154,15 +153,10 @@ function TerminalContent({ session }: { session: Session }) {
 
 function TerminalPanel({ session, secondary = false }: { session: Session; secondary?: boolean }) {
   const {
-    tabs,
     sessions,
-    selectedSession,
     connections,
-    openSession,
-    closeTab,
     setSessionManual,
-    inspectSession,
-    openModal,
+    inspectHistory,
     split,
     setSplit,
     notify,
@@ -170,105 +164,26 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
   const connection = connections.find((item) => item.id === session.connectionId) ?? emptyConnection
   const manual = session.mode === 'MANUAL'
   const setManual = (value: boolean) => setSessionManual(session.id, value)
-  const [bottomTab, setBottomTab] = useState<'terminal' | 'files'>('terminal')
   return (
     <section
       className={cn('terminal-panel', secondary && 'terminal-panel-secondary')}
       aria-label={secondary ? '第二终端面板' : '终端面板'}
     >
-      <div className="session-tabs">
-        {secondary ? (
-          <div className="session-tab is-active">
-            <Terminal size={13} />
-            <span>{session.name}</span>
-          </div>
-        ) : (
-          tabs.map((id) => {
-            const item = sessions.find((value) => value.id === id)
-            if (!item) return null
-            return (
-              <div key={id} className={cn('session-tab', selectedSession.id === id && 'is-active')}>
-                <button
-                  className="session-tab-main"
-                  onClick={() => openSession(id)}
-                  aria-pressed={selectedSession.id === id}
-                  title={`${item.name} · ${connections.find((connection) => connection.id === item.connectionId)?.name ?? '已删除连接'}`}
-                >
-                  <span className="status-dot" />
-                  <span>{item.name}</span>
-                </button>
-                <button
-                  className="session-tab-close"
-                  aria-label={`收起 ${item.name} 标签`}
-                  title="仅收起标签，会话继续运行"
-                  onClick={() => closeTab(id)}
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            )
-          })
-        )}
-        {!secondary && (
-          <Hint label="新建会话">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="session-add"
-              aria-label="新建会话"
-              onClick={() => openModal('session')}
-            >
-              <Plus size={15} />
-            </Button>
-          </Hint>
-        )}
-        <div className="session-tabs-end">
-          <Menu
-            trigger={
-              <Button variant="ghost" size="icon" aria-label="终端选项">
-                <Ellipsis size={16} />
-              </Button>
-            }
-            items={[
-              {
-                label: '复制会话 ID',
-                icon: <Copy size={14} />,
-                onSelect: () => void navigator.clipboard.writeText(session.id).then(() => notify('已复制会话 ID')).catch(() => notify(session.id)),
-              },
-              {
-                label: split ? '关闭分屏' : '拆分终端',
-                icon: <SquareSplitHorizontal size={14} />,
-                onSelect: () => setSplit(!split),
-              },
-              {
-                label: '管理此会话',
-                icon: <History size={14} />,
-                onSelect: () => inspectSession(session.id),
-              },
-            ]}
-          />
-        </div>
-      </div>
       <div className="terminal-address">
         <div className="terminal-connection">
           <ShieldCheck size={13} />
           <span>
-            {connection.user}@{connection.host}
+            {connection.user ? `${connection.user}@` : ''}{connection.host}
           </span>
           {connection.type === 'SSH' && <span className="terminal-port">:{connection.port}</span>}
-          <Badge>{connection.type === 'Local' ? 'ZSH' : 'SSH'}</Badge>
+          <Badge>{connection.type === 'Local' ? 'LOCAL' : 'SSH'}</Badge>
         </div>
-        {connection.type !== 'Local' && ['Production', 'Development'].includes(connection.group) && (
-          <span className={cn('terminal-env', connection.group === 'Production' && 'is-production')}>
-            {connection.group}
-          </span>
-        )}
         <div className="terminal-session-meta">
           <div className={cn('terminal-header-notice', manual && 'is-manual')}>
             {session.status === 'ended' ? <div><History size={13} /><span>会话已结束 · {session.result} · 终端输出已保留</span></div> : <>
               <div>
                 {manual ? <Keyboard size={13} /> : <Radio size={13} />}
-                <span>{manual ? '你正在控制终端 · AI 写入已暂停' : 'AI 正在使用此终端，你可以随时接管。'}</span>
+                <span>{manual ? '你正在控制终端 · AI 写入已暂停' : '允许 MCP 写入 · 你可以随时接管'}</span>
               </div>
             </>}
           </div>
@@ -284,7 +199,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
               AI 自动
             </button>
             <button
-              className={cn('terminal-control-option', manual && 'is-active')}
+              className={cn('terminal-control-option is-manual', manual && 'is-active')}
               aria-pressed={manual}
               disabled={session.status === 'ended'}
               onClick={() => setManual(true)}
@@ -293,98 +208,65 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
               手动控制
             </button>
           </div>
-          <div className="terminal-session-id" title={session.id}>
-            <span className="terminal-meta-label">Session ID</span>
-            <code>{session.id}</code>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="复制 Session ID"
-              title="复制 Session ID"
-              onClick={() => void navigator.clipboard.writeText(session.id).then(() => notify('已复制会话 ID')).catch(() => notify(session.id))}
-            >
-              <Copy size={12} />
-            </Button>
-          </div>
-          <span className="terminal-ready">
-            <span className="status-dot" />
+          <span className={cn('terminal-ready', session.status === 'ended' && 'is-ended', session.status === 'attention' && 'is-attention')}>
+            <span className={cn('status-dot', session.status === 'ended' && 'is-offline')} />
             {sessionStatus[session.status].label}
           </span>
+          <span className="terminal-encoding">UTF-8</span>
+          <Menu
+            trigger={
+              <Button variant="ghost" size="icon" aria-label="终端选项">
+                <Ellipsis size={16} />
+              </Button>
+            }
+            items={[
+              {
+                label: split ? '关闭分屏' : '拆分终端',
+                icon: <SquareSplitHorizontal size={14} />,
+                onSelect: () => { if (split || sessions.some(item => item.id !== session.id && item.status !== 'ended')) setSplit(!split); else notify('再打开一个会话即可拆分终端') },
+              },
+              {
+                label: '查看终端历史',
+                icon: <History size={14} />,
+                onSelect: () => inspectHistory(session.id),
+              },
+            ]}
+          />
         </div>
       </div>
-      <div className="terminal-body" hidden={bottomTab !== 'terminal'}><TerminalContent session={session} /></div>
-      {bottomTab === 'files' && <div className="terminal-files empty-state"><FolderOpen size={22} /><h3>文件浏览不可用</h3><p>当前后台协议未提供目录浏览接口。</p></div>}
-      <div className="terminal-bottom">
-        <div className="terminal-bottom-tabs">
-          <button
-            className={bottomTab === 'terminal' ? 'is-active' : ''}
-            onClick={() => setBottomTab('terminal')}
-          >
-            <Terminal size={12} />
-            终端
-          </button>
-          <button
-            className={bottomTab === 'files' ? 'is-active' : ''}
-            onClick={() => setBottomTab('files')}
-          >
-            <FolderOpen size={12} />
-            文件
-          </button>
+      <div className="terminal-frame">
+        <div className="terminal-body"><TerminalContent session={session} /></div>
+        <div className="terminal-bottom">
+          <button className="terminal-history-link" onClick={() => inspectHistory(session.id)}><History size={12} />终端历史<ArrowRight size={11} /></button>
+          <span>{connection.type === 'Local' ? 'LOCAL' : 'SSH'}<span className="status-separator">/</span>{manual ? 'MANUAL' : 'AUTO'}</span>
+          <span className="terminal-latency"><span className={cn('status-dot', session.status === 'ended' && 'is-offline')} />{session.duration} · {sessionStatus[session.status].label}</span>
         </div>
-        <span>
-          {connection.type === 'Local' ? '本地终端' : 'SSH'} <span className="status-separator">/</span> UTF-8
-        </span>
-        <span className="terminal-latency">
-          <span className="status-dot" />
-          {sessionStatus[session.status].label}
-        </span>
       </div>
     </section>
   )
 }
 
 export default function Workspace() {
-  const {
-    selectedSession,
-    sessions,
-    tabs,
-    split,
-    openModal,
-  } = useDesign()
-  const otherSession = sessions.find(
-    (item) => item.id !== selectedSession.id && item.status !== 'ended',
-  )
-  if (!tabs.length || !selectedSession.id)
-    return (
-      <div className="workspace-page">
-        <PageHeading title="终端工作区" description="在这里打开会话，继续你的工作。">
-          <Button onClick={() => openModal('session')}>
-            <Plus size={15} />
-            新建会话
-          </Button>
-        </PageHeading>
-        <div className="workspace-empty empty-state">
-          <PanelsTopLeft size={34} />
-          <h3>标签已收起，会话仍在这里</h3>
-          <p>重新打开任意会话，或新建一个会话开始工作。</p>
-          <Button variant="outline" onClick={() => openModal('session')}>
-            新建会话
-            <ArrowRight size={13} />
-          </Button>
-          <span className="subtle">后台暂无活跃会话</span>
-        </div>
-      </div>
-    )
-  return (
-    <div className="workspace-page workspace-terminal-page">
-      <div className="workspace-grid">
-        <div className="workspace-main">
-          <div className={cn('terminal-panes', split && 'is-split')}>
-            <TerminalPanel session={selectedSession} />
-            {split && otherSession && <TerminalPanel session={otherSession} secondary />}
-          </div>
-        </div>
+  const { selectedSession, sessions, split, openModal, connections, openConnection, openSession, navigate } = useDesign()
+  const otherSession = sessions.find(item => item.id !== selectedSession.id && item.status !== 'ended')
+  const profiles = connections.filter(connection => !connection.archived)
+  const active = sessions.filter(session => session.status !== 'ended')
+  if (!selectedSession.id) return <div className="workspace-page workspace-welcome">
+    <div className="welcome-heading"><span className="welcome-kicker"><span className="gradient-line" />YOUR TERMINAL, CONNECTED</span><span className="welcome-badge"><ShieldCheck size={12} />本地工作区</span></div>
+    <div className="welcome-content">
+      <span className="welcome-mark"><Terminal size={32} strokeWidth={1.8} /></span>
+      <h1>连接终端，<span>专注当下。</span></h1>
+      <p>从一台主机、一个本地终端开始。<br />与 AI 共享工作区，每一步都由你掌控。</p>
+      <div className="welcome-actions"><Button onClick={() => openModal(profiles.length ? 'session' : 'connection')}><Plus size={15} />{profiles.length ? '新建会话' : '添加第一个连接'}<ArrowRight size={14} /></Button><Button variant="outline" onClick={() => navigate('integrations')}><Workflow size={14} />配置 AI 接入</Button></div>
+      <div className="welcome-quick-section"><div className="welcome-section-label"><span>{active.length ? '继续工作' : profiles.length ? '快速连接' : '从这里开始'}</span><span>{active.length ? `${active.length} 个活跃会话` : 'SSH / LOCAL / MCP'}</span></div>
+        <div className="welcome-quick-grid">{active.length ? active.slice(0, 3).map(session => <button key={session.id} onClick={() => openSession(session.id)}><Terminal size={17} /><strong>{session.name}</strong><span>{session.mode} · {sessionStatus[session.status].label}</span><ArrowRight size={13} /></button>) : profiles.length ? profiles.slice(0, 3).map(connection => <button key={connection.id} onClick={() => openConnection(connection.id)}>{connection.type === 'Local' ? <Terminal size={17} /> : <Server size={17} />}<strong>{connection.name}</strong><span>{connection.type === 'Local' ? connection.command : connection.host}</span><ArrowRight size={13} /></button>) : <>
+          <button onClick={() => openModal('connection')}><Server size={17} /><strong>管理连接</strong><span>SSH 主机与本地 Shell</span><ArrowRight size={13} /></button>
+          <button onClick={() => navigate('integrations')}><Bot size={17} /><strong>接入 AI 工具</strong><span>Claude Code、Codex、Cursor</span><ArrowRight size={13} /></button>
+          <button onClick={() => openModal('import')}><PanelsTopLeft size={17} /><strong>导入工作配置</strong><span>带上你熟悉的连接</span><ArrowRight size={13} /></button>
+        </>}</div>
       </div>
     </div>
-  )
+    <div className="welcome-footer"><span><Keyboard size={12} /><kbd>⌘ K</kbd>快速访问会话与连接</span><span><ShieldCheck size={12} />所有连接与记录保存在本机</span></div>
+  </div>
+  return <div className="workspace-page workspace-terminal-page"><div className="workspace-grid"><div className="workspace-main"><div className={cn('terminal-panes', split && otherSession && 'is-split')}><TerminalPanel session={selectedSession} />{split && otherSession && <TerminalPanel session={otherSession} secondary />}</div></div></div></div>
 }

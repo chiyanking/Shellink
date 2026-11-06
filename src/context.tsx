@@ -1,15 +1,25 @@
 import { createContext, useContext } from 'react'
 import type { Connection, Page, Session } from './data'
-import type { RuntimeInfo, MCPInfo, CallbackRecord } from './backend'
+import type { RuntimeInfo, MCPInfo } from './backend'
 
 export type Modal = 'connection' | 'session' | 'import' | 'commands' | null
+export type SettingsTab = 'general' | 'appearance' | 'advanced'
+export type ConnectionFilter = 'all' | 'SSH' | 'Local'
+export type AIClient = 'Claude Code' | 'Codex' | 'Cursor'
 export type DesignContext = {
   coreEpoch: number
   coreReady: boolean
   connections: Connection[]
+  connectionFilter: ConnectionFilter
+  setConnectionFilter: (filter: ConnectionFilter) => void
+  connectionGroup: string
+  setConnectionGroup: (group: string) => void
+  settingsTab: SettingsTab
+  setSettingsTab: (tab: SettingsTab) => void
+  client: AIClient
+  setClient: (client: AIClient) => void
   runtime: RuntimeInfo | null
   mcp: MCPInfo | null
-  messages: CallbackRecord[]
   refresh: () => Promise<void>
   editConnection: (id: string) => void
   deleteConnection: (id: string) => Promise<void>
@@ -28,8 +38,6 @@ export type DesignContext = {
   inspectHistory: (sessionId: string, eventId?: string) => void
   setSessionManual: (id: string, manual: boolean) => Promise<void>
   openConnection: (id: string) => void
-  tabs: string[]
-  closeTab: (id: string) => void
   manual: boolean
   setManual: (manual: boolean) => void
   split: boolean

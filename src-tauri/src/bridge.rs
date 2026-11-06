@@ -184,7 +184,7 @@ fn dispatch(app: &AppHandle, backend: &Backend, method: &str, params: &Value) ->
             "serviceVersion": env!("CARGO_PKG_VERSION"),
             "serviceCommit": "unknown",
             "protocolVersion": 1,
-            "capabilities": ["system.hello", "system.ping", "system.status", "system.stop", "profiles.list", "profiles.get", "profiles.create", "profiles.update", "profiles.delete", "sessions.list", "sessions.create", "sessions.state", "sessions.authPending", "sessions.authRespond", "sessions.history", "sessions.input", "sessions.mode", "sessions.resize", "sessions.close", "sessions.removeRecord", "sessions.rename", "sessions.replay", "sessions.historyChunks", "webhooks.list", "webhooks.create", "webhooks.delete", "webhooks.messages", "webhooks.clearMessages", "events.subscribe", "events.unsubscribe", "mcp.info", "mcp.config"]
+            "capabilities": ["system.hello", "system.ping", "system.status", "system.stop", "profiles.list", "profiles.get", "profiles.create", "profiles.update", "profiles.delete", "sessions.list", "sessions.create", "sessions.state", "sessions.authPending", "sessions.authRespond", "sessions.history", "sessions.input", "sessions.mode", "sessions.resize", "sessions.close", "sessions.removeRecord", "sessions.rename", "sessions.replay", "sessions.historyChunks", "events.subscribe", "events.unsubscribe", "mcp.info", "mcp.config"]
         })),
         "system.ping" => Ok(json!({"pong": true, "at": now()})),
         "system.status" => system_status(app, &db, &manager, &server, backend),
@@ -286,14 +286,6 @@ fn dispatch(app: &AppHandle, backend: &Backend, method: &str, params: &Value) ->
             required_string(params, "name")?,
         ),
         "sessions.replay" => manager.replay(&db, required_string(params, "id")?),
-        "webhooks.list" => db.webhooks(),
-        "webhooks.create" => db.webhook_create(params),
-        "webhooks.delete" => db.webhook_delete(required_string(params, "id")?),
-        "webhooks.messages" => Ok(server.messages()),
-        "webhooks.clearMessages" => {
-            server.clear_messages();
-            Ok(json!({"ok": true}))
-        }
         "events.subscribe" => backend.subscribe(params),
         "events.unsubscribe" => Ok(backend.unsubscribe(required_string(params, "subscriptionId")?)),
         _ => Err(format!("Unknown method: {method}")),

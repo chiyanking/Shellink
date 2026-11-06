@@ -6,7 +6,6 @@ import {
   Braces,
   Check,
   CircleHelp,
-  Code2,
   Copy,
   FileClock,
   FolderOpen,
@@ -20,235 +19,93 @@ import {
   Search,
   Server,
   Settings2,
+  X,
   ShieldCheck,
   Sun,
   Terminal,
   Trash2,
   Upload,
   Workflow,
-  Webhook,
   Zap,
 } from 'lucide-react'
-import WebhookMessages from './Webhook'
 import { useDesign } from './context'
 import { Badge, Button, Input, Menu, Select, Switch } from './components/ui'
 import { cn } from './lib/utils'
 import { PageHeading } from './Workspace'
+import { settingsNavigation } from './Navigation'
 
 export function ConnectionsPage() {
-  const { connections, openConnection, openModal, notify, sessions, inspectSession, editConnection, deleteConnection } = useDesign()
-  const [filter, setFilter] = useState('all')
+  const {
+    connections, openConnection, openModal, notify, sessions, inspectHistory, editConnection, deleteConnection,
+    connectionFilter: filter, setConnectionFilter: setFilter, connectionGroup, setConnectionGroup,
+  } = useDesign()
   const [search, setSearch] = useState('')
-  const shown = connections.filter(
-    (item) =>
-      (filter === 'all' || item.type === filter) &&
-      `${item.name} ${item.host} ${item.group}`.toLowerCase().includes(search.toLowerCase()),
-  )
-  return (
-    <div className="standard-page connections-page">
-      <PageHeading
-        eyebrow="CONNECTIONS"
-        title="连接管理"
-        description="管理主机与认证配置。一个连接，可以创建多个独立会话。"
-      >
-        <Button variant="outline" onClick={() => openModal('import')}>
-          <Upload size={14} />
-          导入连接
-        </Button>
-        <Button onClick={() => openModal('connection')}>
-          <Plus size={15} />
-          新建连接
-        </Button>
-      </PageHeading>
-      <div className="connections-toolbar">
-        <div className="filter-tabs" aria-label="连接类型">
-          {[
-            { id: 'all', label: '全部连接', count: connections.length },
-            { id: 'SSH', label: 'SSH', count: connections.filter(item => item.type === 'SSH').length },
-            { id: 'Local', label: '本地', count: connections.filter(item => item.type === 'Local').length },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setFilter(tab.id)}
-              aria-pressed={filter === tab.id}
-              className={filter === tab.id ? 'is-active' : ''}
-            >
-              {tab.label}
-              <span>{tab.count}</span>
-            </button>
-          ))}
-        </div>
-        <div className="toolbar-right">
-          <label className="search-input">
-            <Search size={14} />
-            <Input
-              placeholder="搜索名称、地址或分组…"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              aria-label="搜索连接"
-            />
-          </label>
-          <Menu
-            trigger={
-              <Button variant="outline" size="icon" aria-label="连接筛选">
-                <ListFilter size={15} />
-              </Button>
-            }
-            items={[
-              { label: '全部分组', checked: true },
-              { label: '按名称排序', onSelect: () => notify('当前连接按分组排列。') },
-            ]}
-          />
-        </div>
-      </div>
-      <div className="connection-table-wrap">
-        <table className="connection-table">
-          <thead>
-            <tr>
-              <th>连接名称</th>
-              <th>目标地址</th>
-              <th>分组</th>
-              <th>活跃会话</th>
-              <th>最近使用</th>
-              <th>
-                <span className="sr-only">操作</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((connection) => {
-              const activeSessions = sessions.filter(
-                (session) => session.connectionId === connection.id && session.status !== 'ended',
-              )
-              return (
-                <tr key={connection.id}>
-                  <td>
-                    <button
-                      className="table-connection"
-                      onClick={() => openConnection(connection.id)}
-                    >
-                      <span className={cn('connection-icon', `color-${connection.color}`)}>
-                        {connection.type === 'SSH' ? <Server size={17} /> : <Terminal size={17} />}
-                      </span>
-                      <span>
-                        <strong>{connection.name}</strong>
-                        <small>
-                          {connection.type === 'SSH' ? 'SSH · 端口 22' : '本地 Shell · zsh'}
-                        </small>
-                      </span>
-                    </button>
-                  </td>
-                  <td className="mono table-address">
-                    {connection.user}@{connection.host}
-                  </td>
-                  <td>
-                    <Badge>{connection.group}</Badge>
-                  </td>
-                  <td>
-                    <button
-                      className={cn(
-                        'connection-state connection-session-count',
-                        !activeSessions.length && 'is-offline',
-                      )}
-                      disabled={!activeSessions.length}
-                      onClick={() => inspectSession(activeSessions[0]!.id)}
-                    >
-                      <span className="status-dot" />
-                      {activeSessions.length ? `${activeSessions.length} 个会话` : '暂无会话'}
-                      {activeSessions.length > 0 && <ArrowUpRight size={11} />}
-                    </button>
-                  </td>
-                  <td className="subtle">{activeSessions.length ? '刚刚' : '昨天'}</td>
-                  <td>
-                    <div className="table-actions">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => openConnection(connection.id)}
-                      >
-                        {activeSessions.length ? '打开会话' : '新建会话'}
-                        <ArrowUpRight size={13} />
-                      </Button>
-                      <Menu
-                        trigger={
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={`${connection.name} 的更多操作`}
-                          >
-                            <MoreHorizontal size={16} />
-                          </Button>
-                        }
-                        items={[
-                          {
-                            label: '编辑连接',
-                            icon: <Settings2 size={14} />,
-                            onSelect: () => editConnection(connection.id),
-                          },
-                          {
-                            label: '复制目标地址',
-                            icon: <Copy size={14} />,
-                            onSelect: () => void navigator.clipboard.writeText(connection.type === 'SSH' ? `${connection.user}@${connection.host}:${connection.port}` : connection.command ?? '').then(() => notify('已复制目标地址')).catch(() => notify('复制失败')),
-                          },
-                          {
-                            label: '查看历史记录',
-                            icon: <FileClock size={14} />,
-                            onSelect: () => { const session = sessions.find(item => item.connectionId === connection.id); if (session) inspectSession(session.id); else notify('此连接尚无会话') },
-                          },
-                          { label: '删除连接配置', icon: <Trash2 size={14} />, onSelect: () => { if (window.confirm(`删除连接“${connection.name}”？现有会话和历史会保留。`)) void deleteConnection(connection.id) } },
-                        ]}
-                      />
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-        {!shown.length && (
-          <div className="empty-state">
-            <Search size={25} />
-            <h3>没有匹配的连接</h3>
-            <p>试试其他名称、地址或分组。</p>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSearch('')
-                setFilter('all')
-              }}
-            >
-              清除筛选
-            </Button>
-          </div>
-        )}
-      </div>
-      <div className="table-footer">
-        <span>共 {shown.length} 个连接</span>
-        <span>
-          <ShieldCheck size={13} />
-          连接信息仅保存在本地
-        </span>
-      </div>
-      <section className="import-banner">
-        <div className="import-banner-icon">
-          <FolderOpen size={22} />
-        </div>
-        <div>
-          <h3>把熟悉的连接带过来</h3>
-          <p>导入 Shellink 连接 JSON，继续使用已有的主机配置。</p>
-        </div>
-        <Button variant="outline" onClick={() => openModal('import')}>
-          导入配置
-          <ArrowRight size={14} />
-        </Button>
-      </section>
+  const [sortByName, setSortByName] = useState(false)
+  const profiles = connections.filter(item => !item.archived)
+  const shown = profiles.filter(item =>
+    (filter === 'all' || item.type === filter) && (connectionGroup === 'all' || item.group === connectionGroup) &&
+    `${item.name} ${item.host} ${item.group}`.toLowerCase().includes(search.toLowerCase()),
+  ).sort((a, b) => sortByName ? a.name.localeCompare(b.name) : 0)
+  const active = sessions.filter(session => session.status !== 'ended')
+  return <div className="standard-page connections-page">
+    <PageHeading eyebrow="YOUR INFRASTRUCTURE" title="连接管理" description={`${profiles.length} 个连接 · ${profiles.filter(item => item.connected).length} 个连接有活跃会话 · 随时连接，继续工作。`}>
+      <Button variant="outline" onClick={() => openModal('import')}><Upload size={14} />导入连接</Button>
+      <Button onClick={() => openModal('connection')}><Plus size={14} />新增连接</Button>
+    </PageHeading>
+    <div className="connection-stats">
+      {[
+        { value: profiles.length, label: '全部连接', icon: Server, tone: '' },
+        { value: active.length, label: '活跃会话', icon: Terminal, tone: 'green' },
+        { value: profiles.filter(item => item.type === 'SSH').length, label: 'SSH 主机', icon: Globe, tone: 'purple' },
+        { value: profiles.filter(item => item.type === 'Local').length, label: '本地连接', icon: Monitor, tone: 'cyan' },
+      ].map(stat => <div className={`connection-stat tone-${stat.tone}`} key={stat.label}><div><strong>{stat.value.toString().padStart(2, '0')}</strong><stat.icon size={17} /></div><span>{stat.label}</span></div>)}
     </div>
-  )
+    <div className="connections-toolbar">
+      <div className="filter-tabs" aria-label="连接类型">{([
+        { id: 'all', label: '全部', count: profiles.length },
+        { id: 'SSH', label: 'SSH', count: profiles.filter(item => item.type === 'SSH').length },
+        { id: 'Local', label: '本地', count: profiles.filter(item => item.type === 'Local').length },
+      ] as const).map(tab => <button key={tab.id} onClick={() => setFilter(tab.id)} aria-pressed={filter === tab.id} className={filter === tab.id ? 'is-active' : ''}>{tab.label}<span>{tab.count}</span></button>)}
+        {connectionGroup !== 'all' && <button className="group-filter-chip" onClick={() => setConnectionGroup('all')}>{connectionGroup}<X size={11} /></button>}
+      </div>
+      <div className="toolbar-right">
+        <label className="search-input"><Search size={14} /><Input placeholder="搜索名称、地址或分组…" value={search} onChange={event => setSearch(event.target.value)} aria-label="搜索连接" /></label>
+        <Menu trigger={<Button variant="outline" size="icon" aria-label="连接排序"><ListFilter size={15} /></Button>} items={[
+          { label: '默认排序', checked: !sortByName, onSelect: () => setSortByName(false) },
+          { label: '按名称排序', checked: sortByName, onSelect: () => setSortByName(true) },
+        ]} />
+      </div>
+    </div>
+    <div className="connection-card-grid">
+      {shown.map(connection => {
+        const activeSessions = active.filter(session => session.connectionId === connection.id)
+        const latestSession = sessions.filter(session => session.connectionId === connection.id).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0]
+        const address = connection.type === 'SSH' ? `${connection.user}@${connection.host}:${connection.port}` : connection.command ?? 'localhost'
+        return <article key={connection.id} className={cn('server-card', activeSessions.length > 0 && 'is-live')}>
+          <div className="server-card-top">
+            <span className={cn('server-glyph', `color-${connection.color}`)}>{connection.type === 'Local' ? <Terminal size={20} /> : <Server size={20} />}</span>
+            <div className="server-card-name"><h2 title={connection.name}>{connection.name}</h2><p title={address}>{address}</p></div>
+            <Menu trigger={<Button variant="ghost" size="icon" aria-label={`${connection.name} 的更多操作`}><MoreHorizontal size={16} /></Button>} items={[
+              { label: '编辑连接', icon: <Settings2 size={14} />, onSelect: () => editConnection(connection.id) },
+              { label: '复制目标地址', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(address).then(() => notify('已复制目标地址')).catch(() => notify('复制失败')) },
+              { label: '查看历史记录', icon: <FileClock size={14} />, onSelect: () => latestSession ? inspectHistory(latestSession.id) : notify('此连接尚无会话') },
+              { label: '删除连接配置', icon: <Trash2 size={14} />, danger: true, onSelect: () => { if (window.confirm(`删除连接“${connection.name}”？现有会话和历史会保留。`)) void deleteConnection(connection.id) } },
+            ]} />
+          </div>
+          <div className="server-card-tags"><span className={cn('environment-tag', connection.group === 'Production' ? 'is-production' : connection.type === 'Local' ? 'is-local' : 'is-development')}>{connection.group}</span><Badge>{connection.type === 'SSH' ? 'SSH' : 'LOCAL'}</Badge>{connection.profile?.authType && connection.type === 'SSH' && <span className="server-auth"><ShieldCheck size={11} />{connection.profile.authType === 'key' ? '密钥' : connection.profile.authType.includes('mfa') || connection.profile.authType === 'keyboard-interactive' ? 'MFA / 2FA' : '密码'}</span>}</div>
+          <div className="server-card-bottom"><span className={cn('server-session-state', !activeSessions.length && 'is-idle')}><span className="status-dot" />{activeSessions.length ? `${activeSessions.length} 个活跃会话` : '尚无活跃会话'}</span><Button size="sm" variant={activeSessions.length ? 'default' : 'outline'} onClick={() => openConnection(connection.id)}>{activeSessions.length ? '打开终端' : '连接'}<ArrowUpRight size={12} /></Button></div>
+        </article>
+      })}
+      {(shown.length > 0 || profiles.length === 0) && <button className="new-connection-card" onClick={() => openModal('connection')}><span><Plus size={22} /></span><strong>添加新连接</strong><small>SSH 主机或本地终端</small></button>}
+    </div>
+    {!shown.length && profiles.length > 0 && <div className="empty-state"><Search size={25} /><h3>没有匹配的连接</h3><p>试试其他名称、地址或分组。</p><Button variant="outline" onClick={() => { setSearch(''); setFilter('all'); setConnectionGroup('all') }}>清除筛选</Button></div>}
+    <div className="table-footer"><span>共 {shown.length} 个连接</span><span><ShieldCheck size={13} />连接信息仅保存在本地</span></div>
+    <section className="import-banner"><div className="import-banner-icon"><FolderOpen size={22} /></div><div><h3>把熟悉的连接带过来</h3><p>导入 Shellink 连接 JSON，继续使用已有的主机配置。</p></div><Button variant="outline" onClick={() => openModal('import')}>导入配置<ArrowRight size={14} /></Button></section>
+  </div>
 }
 
 export function IntegrationsPage() {
-  const { notify, mcp, refresh } = useDesign()
-  const [client, setClient] = useState('Claude Code')
+  const { notify, mcp, refresh, client, setClient } = useDesign()
   const [transport, setTransport] = useState('http')
   const [httpEnabled, setHttpEnabled] = useState(mcp?.httpEnabled ?? false)
   const [busy, setBusy] = useState(false)
@@ -282,7 +139,7 @@ export function IntegrationsPage() {
       >
         <Badge className="preview-badge">
           <span className="status-dot" />
-          配置预览
+          本地 MCP
         </Badge>
       </PageHeading>
       <div className="integration-methods" aria-label="接入方式">
@@ -305,11 +162,11 @@ export function IntegrationsPage() {
             </div>
           </div>
           <div className="client-choices">
-            {[
+            {([
               { name: 'Claude Code', symbol: '✳', className: 'client-claude' },
               { name: 'Codex', symbol: '⌘', className: 'client-codex' },
               { name: 'Cursor', symbol: '◈', className: 'client-cursor' },
-            ].map((item) => (
+            ] as const).map((item) => (
               <button
                 key={item.name}
                 className={cn('client-choice', client === item.name && 'is-active')}
@@ -410,10 +267,10 @@ export function IntegrationsPage() {
               <FileClock size={16} />
               <div>
                 <strong>统一操作记录</strong>
-                <span>知道谁在何时执行了什么</span>
+                <span>按会话查看保存的终端输入与输出</span>
               </div>
             </div>
-            <div className="capability-footnote">以上展示产品设计目标</div>
+            <div className="capability-footnote">终端与 MCP 共享当前 Desktop 工作区</div>
           </section>
           <section className="http-panel">
             <div>
@@ -459,8 +316,7 @@ function SettingRow({
 }
 
 export function SettingsPage() {
-  const { theme, setTheme, notify, runtime, font, fontSize, setFont, setFontSize } = useDesign()
-  const [tab, setTab] = useState('general')
+  const { theme, setTheme, notify, runtime, font, fontSize, setFont, setFontSize, settingsTab: tab, setSettingsTab: setTab } = useDesign()
   const [restore, setRestore] = useState(() => localStorage.getItem('shellink.restore') !== 'false')
   const [size, setSize] = useState(fontSize)
   return (
@@ -470,40 +326,16 @@ export function SettingsPage() {
         title="设置"
         description="一个顺手的工具，应该懂你的习惯。"
       />
+      <nav className="settings-mobile-nav" aria-label="设置分类">{settingsNavigation.map(item => <button key={item.id} className={tab === item.id ? 'is-active' : ''} aria-pressed={tab === item.id} onClick={() => setTab(item.id)}><item.icon size={14} />{item.label}</button>)}</nav>
       <div className="settings-layout">
-        <nav className="settings-nav" aria-label="设置分类">
-          {[
-            { id: 'general', label: '通用', icon: Settings2 },
-            { id: 'appearance', label: '外观与终端', icon: Monitor },
-            { id: 'webhook', label: 'Webhook 回调', icon: Webhook },
-            { id: 'advanced', label: '高级', icon: Code2 },
-          ].map((item) => (
-            <button
-              key={item.id}
-              className={tab === item.id ? 'is-active' : ''}
-              aria-pressed={tab === item.id}
-              onClick={() => setTab(item.id)}
-            >
-              <item.icon size={15} />
-              {item.label}
-            </button>
-          ))}
-          <div className="settings-version">
-            <span className="brand-mark small">
-              <Terminal size={15} />
-            </span>
-            <strong>Shellink</strong>
-            <span>{runtime?.status.version ?? '后台未连接'}</span>
-          </div>
-        </nav>
-        <div className={cn('settings-content', tab === 'webhook' && 'settings-content-webhook')}>
+        <div className="settings-content">
           {tab === 'general' && (
             <>
               <div className="settings-section-title">
                 <h2>工作区</h2>
                 <p>打开即用，下次继续。</p>
               </div>
-              <SettingRow title="启动时恢复工作区" description="重新打开上次的标签页和活动会话。">
+              <SettingRow title="启动时恢复工作区" description="恢复上次查看的会话，在左侧列表切换其他会话。">
                 <Switch
                   checked={restore}
                   onCheckedChange={value => { setRestore(value); localStorage.setItem('shellink.restore', String(value)) }}
@@ -606,7 +438,6 @@ export function SettingsPage() {
               </div>
             </>
           )}
-          {tab === 'webhook' && <WebhookMessages />}
           {tab === 'advanced' && (
             <>
               <div className="settings-section-title">
@@ -621,15 +452,6 @@ export function SettingsPage() {
               </SettingRow>
               <SettingRow title="HTTP 服务" description={runtime?.status.httpUrl ?? 'HTTP 服务未启用'}><Badge tone={runtime?.status.httpEnabled ? 'green' : 'neutral'}>{runtime?.status.httpEnabled ? '运行中' : '已关闭'}</Badge></SettingRow>
                 <SettingRow title="活动会话" description="Desktop 实时状态"><Badge>{runtime?.status.activeSessions ?? 0}</Badge></SettingRow>
-              <SettingRow title="Webhook 回调消息" description="查看外部服务发送到 Shellink 的回调事件和消息原文。">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setTab('webhook')}
-                >
-                  管理
-                </Button>
-              </SettingRow>
                 <SettingRow title="诊断信息" description="查看 Desktop 核心、版本和运行环境。">
                 <Button
                   variant="outline"

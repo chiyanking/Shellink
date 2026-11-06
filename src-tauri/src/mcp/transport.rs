@@ -108,17 +108,6 @@ fn handle(mut stream: TcpStream, app: AppHandle, internal: bool, stop: &AtomicBo
         respond_error(&mut stream, status, &message);
         return;
     }
-    if request.path == "/shellink/webhook/callback" {
-        match serde_json::from_slice::<Value>(&request.body) {
-            Ok(body) => respond_json(
-                &mut stream,
-                202,
-                app.state::<Server>().receive_message(&app, body),
-            ),
-            Err(_) => respond_error(&mut stream, 400, "request body must be valid JSON"),
-        }
-        return;
-    }
     let expected = match app.state::<DataStore>().mcp_info() {
         Ok(info) => info["token"].as_str().unwrap_or_default().to_owned(),
         Err(error) => {
@@ -165,8 +154,7 @@ fn validate_request(
     host: &str,
     port: u16,
 ) -> Result<(), (u16, String)> {
-    if request.path != "/shellink/mcp" && (internal || request.path != "/shellink/webhook/callback")
-    {
+    if request.path != "/shellink/mcp" {
         return Err((404, "not found".into()));
     }
     if let Some(origin) = request.headers.get("origin") {

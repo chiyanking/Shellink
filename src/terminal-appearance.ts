@@ -17,27 +17,27 @@ type Palette = {
  * Kept in TS rather than read from CSS variables: xterm resolves its theme once
  * at construction time, and child effects run before App's effect adds `.dark`
  * to <html>. Reading the DOM there yields the light palette on a dark startup.
- * Values mirror --terminal-* in desktop.css.
+ * Values mirror --terminal-* in aurora.css; both schemes keep a dark terminal.
  */
 export const terminalPalettes: Record<ColorScheme, Palette> = {
   light: {
-    canvas: '#ffffff',
-    foreground: '#50596a',
-    muted: '#89909d',
-    command: '#2c3443',
-    prompt: '#267d65',
-    path: '#5475c7',
-    cursor: '#5c81e2',
-    selection: '#cfdcfb',
+    canvas: '#0d1017',
+    foreground: '#b7bfd0',
+    muted: '#727d93',
+    command: '#eef1f8',
+    prompt: '#3ddc97',
+    path: '#7c9dff',
+    cursor: '#3fd0f0',
+    selection: '#333454',
   },
   dark: {
-    canvas: '#121317',
-    foreground: '#aeb4c1',
-    muted: '#757b8a',
-    command: '#d2d6e0',
-    prompt: '#8fceb3',
-    path: '#93acf4',
-    cursor: '#9cb4f5',
+    canvas: '#05060a',
+    foreground: '#b7bfd0',
+    muted: '#727d93',
+    command: '#eef1f8',
+    prompt: '#3ddc97',
+    path: '#7c9dff',
+    cursor: '#3fd0f0',
     selection: '#39405a',
   },
 }
@@ -49,22 +49,13 @@ type AnsiPalette = Pick<
   | 'brightBlue' | 'brightMagenta' | 'brightCyan' | 'brightWhite'
 >
 
-/** HexHub-like code surface: muted canvas, saturated but readable ANSI roles. */
-const ansiPalettes: Record<ColorScheme, AnsiPalette> = {
-  light: {
-    black: '#2c3443', red: '#c05b60', green: '#267d65', yellow: '#9a6b16',
-    blue: '#3b63bd', magenta: '#7d55b5', cyan: '#1f7d92', white: '#d6dae2',
-    brightBlack: '#737985', brightRed: '#d9757a', brightGreen: '#3a9c7d',
-    brightYellow: '#b5872c', brightBlue: '#5b7edb', brightMagenta: '#9a74d0',
-    brightCyan: '#3a9db2', brightWhite: '#f0f2f6',
-  },
-  dark: {
-    black: '#23252c', red: '#e8878b', green: '#8fceb3', yellow: '#d7b473',
-    blue: '#93acf4', magenta: '#b09adf', cyan: '#7fc8d8', white: '#c3c8d4',
-    brightBlack: '#6b7182', brightRed: '#f2a5a8', brightGreen: '#a9e4c9',
-    brightYellow: '#e7c98d', brightBlue: '#adc1fa', brightMagenta: '#c9b6ee',
-    brightCyan: '#9edbe7', brightWhite: '#eef0f6',
-  },
+/** Saturated ANSI roles remain readable on the dark terminal in either scheme. */
+const ansiPalette: AnsiPalette = {
+  black: '#232733', red: '#ff7b8a', green: '#3ddc97', yellow: '#ffc857',
+  blue: '#7c9dff', magenta: '#b18cff', cyan: '#3fd0f0', white: '#b7bfd0',
+  brightBlack: '#727d93', brightRed: '#ffa2ad', brightGreen: '#82edbd',
+  brightYellow: '#ffdc8e', brightBlue: '#a7bcff', brightMagenta: '#cfb6ff',
+  brightCyan: '#8ce8fa', brightWhite: '#eef1f8',
 }
 
 export function terminalTheme(scheme: ColorScheme): ITheme {
@@ -76,12 +67,12 @@ export function terminalTheme(scheme: ColorScheme): ITheme {
     cursor: p.cursor,
     cursorAccent: p.canvas,
     selectionBackground: p.selection,
-    selectionInactiveBackground: dark ? '#2c3145' : '#dde6fa',
+    selectionInactiveBackground: dark ? '#2c3145' : '#2b3047',
     overviewRulerBorder: p.canvas,
-    scrollbarSliderBackground: dark ? '#3a3d4a' : '#c9ced9',
-    scrollbarSliderHoverBackground: dark ? '#4a4e5e' : '#aeb6c6',
-    scrollbarSliderActiveBackground: dark ? '#5a6074' : '#8c96ab',
-    ...ansiPalettes[scheme],
+    scrollbarSliderBackground: '#272e3b',
+    scrollbarSliderHoverBackground: '#3a4356',
+    scrollbarSliderActiveBackground: '#515d75',
+    ...ansiPalette,
   }
 }
 

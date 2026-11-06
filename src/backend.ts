@@ -7,7 +7,6 @@ export type Profile = { id: string; name: string; connectType: 'ssh' | 'command'
 export type SessionRecord = { id: string; profileId: string; profileName: string; name: string; source: string; target: string; state: string; mode: 'AUTO' | 'MANUAL'; createdAt: number; closedAt?: number; closeReason?: string; active: boolean }
 export type RuntimeInfo = { status: { version: string; pid: number; httpEnabled: boolean; httpUrl: string | null; activeSessions: number }; dataHome: string; logPath: string; command: string; defaultShell: string; platform: string }
 export type MCPInfo = { stdioRunning: boolean; stdioEnv: Record<string, string>; stdioError?: string; error?: string; enabled: boolean; running: boolean; httpEnabled: boolean; url: string; token: string; command: string; clientConfig: object; clientConfigStdio: object }
-export type CallbackRecord = { id: string; receivedAt: number; data: unknown }
 export type HistoryChunk = { id: number; seq: number; sessionId: string; direction: 'input' | 'output'; plain: string; createdAt: number }
 export type CoreEvent = { subscriptionId: string; event: string; data: { sessionId?: string; direction?: string; raw?: string; plain?: string; seq?: number; [key: string]: unknown }; seq?: number }
 export function rpc<T = unknown>(method: string, params: object = {}, timeoutMs = 30000): Promise<T> {

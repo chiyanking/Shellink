@@ -12,7 +12,7 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 mod stdio;
 mod transport;
@@ -83,7 +83,6 @@ pub struct Server {
     configuration: Mutex<()>,
     bridge_error: Mutex<Option<String>>,
     error: Mutex<Option<String>>,
-    messages: Mutex<Vec<Value>>,
 }
 
 impl Server {
@@ -95,7 +94,6 @@ impl Server {
             configuration: Mutex::new(()),
             bridge_error: Mutex::new(None),
             error: Mutex::new(None),
-            messages: Mutex::new(Vec::new()),
         }
     }
 
@@ -195,39 +193,6 @@ impl Server {
                 let _ = std::fs::remove_file(path);
             }
         }
-    }
-
-    pub fn messages(&self) -> Value {
-        let mut messages = self.messages.lock().unwrap().clone();
-        messages.reverse();
-        Value::Array(messages)
-    }
-
-    pub fn clear_messages(&self) {
-        self.messages.lock().unwrap().clear();
-    }
-
-    fn receive_message(&self, app: &AppHandle, data: Value) -> Value {
-        let message = json!({
-            "id": format!("webhook-{}", crate::data::session_now()),
-            "receivedAt": crate::data::session_now(),
-            "data": data,
-        });
-        let mut messages = self.messages.lock().unwrap();
-        messages.push(message.clone());
-        if messages.len() > 200 {
-            let keep_from = messages.len() - 200;
-            messages.drain(..keep_from);
-        }
-        drop(messages);
-        let event = json!({"event":"webhook.received","data":message});
-        if app
-            .try_state::<Arc<crate::bridge::Backend>>()
-            .is_none_or(|backend| backend.allows_event(&event))
-        {
-            let _ = app.emit("shellink:event", event);
-        }
-        message
     }
 
     fn stop_listener(&self) {
