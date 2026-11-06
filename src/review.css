@@ -568,3 +568,43 @@
     padding: 12px;
   }
 }
+
+/* 共享组件样式：新建会话对话框、工作台空状态、连接列表会话计数 */
+.session-name-field {
+  position: relative;
+  margin-top: 20px;
+}
+.session-name-field > .subtle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  font-size: 10px;
+}
+.workspace-empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface);
+  min-height: 430px;
+}
+.workspace-empty > span:last-child {
+  font-size: 10px;
+  margin-top: 8px;
+}
+.connection-session-count {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+.connection-session-count:disabled {
+  opacity: 1;
+}
+.statusbar-session-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-size: inherit;
+  color: inherit;
+}
+.statusbar-session-link:hover {
+  color: var(--primary-text);
+}

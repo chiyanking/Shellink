@@ -33,19 +33,16 @@ import { Badge, Button, Dialog, Hint, Input, Menu, Select, TooltipProvider } fro
 import { cn } from './lib/utils'
 import Workspace from './Workspace'
 import { ConnectionsPage, HistoryPage, IntegrationsPage, SettingsPage } from './Pages'
-import SessionsPage from './Sessions'
 import SshAuth from './SshAuth'
 
 const navigation = [
   { id: 'workspace', label: '工作台', icon: LayoutGrid, shortcut: '1' },
-  { id: 'sessions', label: '会话管理', icon: PanelsTopLeft, shortcut: '2' },
-  { id: 'connections', label: '连接管理', icon: Server, shortcut: '3' },
-  { id: 'integrations', label: 'AI 接入', icon: Workflow, shortcut: '4' },
-  { id: 'history', label: '历史记录', icon: FileClock, shortcut: '5' },
+  { id: 'connections', label: '连接管理', icon: Server, shortcut: '2' },
+  { id: 'integrations', label: 'AI 接入', icon: Workflow, shortcut: '3' },
+  { id: 'history', label: '历史记录', icon: FileClock, shortcut: '4' },
 ] as const
 const pageNames: Record<Page, string> = {
   workspace: '终端工作区',
-  sessions: '会话管理',
   connections: '连接管理',
   integrations: 'AI 接入',
   history: '历史记录',
@@ -65,7 +62,6 @@ export default function App() {
   const [backendError, setBackendError] = useState('')
   const [loading, setLoading] = useState(true)
   const [selectedSessionId, setSelectedSessionId] = useState(() => preference('selectedSession', ''))
-  const [inspectedSessionId, setInspectedSessionId] = useState('')
   const [historyScope, setHistoryScope] = useState<{ sessionId?: string; eventId?: string }>({})
   const [tabs, setTabs] = useState<string[]>(() => preference('restore', true) ? preference('tabs', []) : [])
   const [theme, setTheme] = useState<'dark' | 'light'>(() => preference('theme', 'light'))
@@ -145,8 +141,7 @@ export default function App() {
     if (window.matchMedia('(max-width: 580px)').matches) setSidebar(false)
   }, [])
   const openSession = useCallback((id: string) => {
-    const session = sessions.find(item => item.id === id); if (!session) return
-    if (session.status === 'ended') { setInspectedSessionId(id); navigate('sessions'); return }
+    if (!sessions.some(item => item.id === id)) return
     setSelectedSessionId(id); setTabs(current => current.includes(id) ? current : [...current, id]); navigate('workspace')
   }, [sessions, navigate])
   async function createSession(connectionId: string, name = '') {
@@ -160,30 +155,12 @@ export default function App() {
     const existing = sessions.find(item => item.connectionId === id && item.status !== 'ended')
     if (existing) openSession(existing.id); else void createSession(id)
   }
-  function inspectSession(id: string) { setInspectedSessionId(id); navigate('sessions') }
+  function inspectSession(id: string) { openSession(id) }
   function inspectHistory(sessionId: string, eventId?: string) { navigate('history'); setHistoryScope({ sessionId, eventId }) }
   async function setSessionManual(id: string, value: boolean) {
     try { await rpc('sessions.mode', { id, mode: value ? 'MANUAL' : 'AUTO' }); await refresh() } catch (error) { notify(errorText(error)) }
   }
   function setManual(value: boolean) { if (selectedSession.id) void setSessionManual(selectedSession.id, value) }
-  async function renameSession(id: string, name: string) { try { await rpc('sessions.rename', { id, name: name.trim() }); await refresh() } catch (error) { notify(errorText(error)); throw error } }
-  async function endSessions(ids: string[]) {
-    try { for (const id of ids) await rpc('sessions.close', { id }); await refresh(); setTabs(current => current.filter(id => !ids.includes(id))); notify(`已结束 ${ids.length} 个会话，终端历史保留。`) } catch (error) { notify(errorText(error)); await refresh(); throw error }
-  }
-  async function removeSessions(ids: string[]) {
-    try {
-      for (const id of ids) await rpc('sessions.removeRecord', { id })
-      await refresh()
-      setTabs(current => current.filter(id => !ids.includes(id)))
-      setSelectedSessionId(current => ids.includes(current) ? '' : current)
-      setInspectedSessionId(current => ids.includes(current) ? '' : current)
-      notify(`已删除 ${ids.length} 个会话及其操作记录。`)
-    } catch (error) {
-      notify(errorText(error))
-      await refresh()
-      throw error
-    }
-  }
   function closeTab(id: string) { const next = tabs.filter(tab => tab !== id); setTabs(next); if (selectedSessionId === id) setSelectedSessionId(next[0] ?? '') }
   function editConnection(id: string) {
     const profile = connections.find(item => item.id === id)?.profile
@@ -199,7 +176,7 @@ export default function App() {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setCommandQuery(''); setModal(current => current === 'commands' ? null : 'commands') }
       if (event.shiftKey && event.key === 'Escape' && !modal && page === 'workspace') { event.preventDefault(); setManual(!manual) }
-      if ((event.metaKey || event.ctrlKey) && /^[1-5]$/.test(event.key) && !modal) { event.preventDefault(); navigate(navigation[Number(event.key) - 1]!.id) }
+      if ((event.metaKey || event.ctrlKey) && /^[1-4]$/.test(event.key) && !modal) { event.preventDefault(); navigate(navigation[Number(event.key) - 1]!.id) }
     }
     window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler)
   }, [manual, modal, selectedSessionId, page, navigate])
@@ -222,12 +199,8 @@ export default function App() {
         selectedSession,
         openSession,
         inspectSession,
-        inspectedSessionId,
         historyScope,
         inspectHistory,
-        endSessions,
-        removeSessions,
-        renameSession,
         setSessionManual,
         openConnection,
         tabs,
@@ -279,8 +252,8 @@ export default function App() {
                   >
                     <item.icon size={16} />
                     <span>{item.label}</span>
-                    {item.id === 'workspace' || item.id === 'sessions' ? (
-                      <Badge>{item.id === 'workspace' ? tabs.length : activeSessionCount}</Badge>
+                    {item.id === 'workspace' ? (
+                      <Badge>{tabs.length}</Badge>
                     ) : (
                       <kbd>⌘{item.shortcut}</kbd>
                     )}
@@ -457,7 +430,6 @@ export default function App() {
               <div className={cn('main-scroll', page === 'workspace' && 'workspace-scroll')} data-ui-scroll-container>
                 {(backendError || loading) && <div className="backend-banner" role="status"><div><strong>{loading ? '正在准备工作区…' : '无法连接 Desktop 核心'}</strong><p>{backendError || '正在初始化本地 Rust 核心。'}</p></div><Button variant="outline" disabled={loading} onClick={() => void retryBackend()}>重新连接</Button></div>}
                 <div className="workspace-slot" hidden={page !== 'workspace'}><Workspace /></div>
-                {page === 'sessions' && <SessionsPage />}
                 {page === 'connections' && <ConnectionsPage />}
                 {page === 'integrations' && <IntegrationsPage />}
                 {page === 'history' && (
@@ -474,7 +446,7 @@ export default function App() {
               <span className="status-dot" />
               <span>本地工作区</span>
               <span className="status-separator">|</span>
-              <button className="statusbar-session-link" onClick={() => navigate('sessions')}>
+              <button className="statusbar-session-link" onClick={() => navigate('workspace')}>
                 {activeSessionCount} 个活跃会话
               </button>
             </div>
@@ -698,7 +670,7 @@ export default function App() {
               >
                 <PanelsTopLeft size={15} />
                 <span>{session.name}</span>
-                <small>{session.status === 'ended' ? '已结束 · 查看详情' : session.id}</small>
+                <small>{session.status === 'ended' ? '已结束 · 打开终端回放' : session.id}</small>
                 <ArrowUpRight size={13} />
               </button>
             ))}

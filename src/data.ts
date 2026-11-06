@@ -1,6 +1,6 @@
 import type { Profile, SessionRecord } from './backend'
 import { preference } from './backend'
-export type Page = 'workspace' | 'sessions' | 'connections' | 'integrations' | 'history' | 'settings'
+export type Page = 'workspace' | 'connections' | 'integrations' | 'history' | 'settings'
 export type SessionStatus = 'ready' | 'running' | 'attention' | 'ended'
 export type Session = { id: string; connectionId: string; name: string; status: SessionStatus; source: 'MCP' | '你' | '未知'; client: string; mode: 'AUTO' | 'MANUAL'; created: string; updated: string; duration: string; command: string; result: string; endedAt?: string; state?: string; createdAt?: number }
 export type Connection = { id: string; name: string; host: string; user: string; group: string; type: 'SSH' | 'Local'; color: 'blue' | 'purple' | 'green'; connected: boolean; system: string; port: number; command?: string; profile?: Profile; archived?: boolean }

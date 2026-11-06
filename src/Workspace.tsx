@@ -350,7 +350,6 @@ export default function Workspace() {
     tabs,
     split,
     openModal,
-    navigate,
   } = useDesign()
   const otherSession = sessions.find(
     (item) => item.id !== selectedSession.id && item.status !== 'ended',
@@ -367,9 +366,9 @@ export default function Workspace() {
         <div className="workspace-empty empty-state">
           <PanelsTopLeft size={34} />
           <h3>标签已收起，会话仍在这里</h3>
-          <p>前往会话管理，重新打开任意活跃会话。</p>
-          <Button variant="outline" onClick={() => navigate('sessions')}>
-            进入会话管理
+          <p>重新打开任意会话，或新建一个会话开始工作。</p>
+          <Button variant="outline" onClick={() => openModal('session')}>
+            新建会话
             <ArrowRight size={13} />
           </Button>
           <span className="subtle">后台暂无活跃会话</span>
