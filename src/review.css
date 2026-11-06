@@ -4,9 +4,9 @@
   line-height: 1.8;
 }
 .review-error-badge {
-  color: #c86868;
-  background: color-mix(in srgb, #c86868 11%, var(--surface));
-  border-color: color-mix(in srgb, #c86868 24%, var(--border));
+  color: var(--red);
+  background: var(--red-soft);
+  border-color: var(--red-border);
 }
 .history-session-scope {
   display: flex;
@@ -128,7 +128,7 @@
   color: var(--subtle-foreground);
 }
 .operation-details .operation-output.review-stderr pre {
-  color: #c86868;
+  color: var(--red);
 }
 .session-history-preview {
   margin-top: 17px;

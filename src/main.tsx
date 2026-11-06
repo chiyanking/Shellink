@@ -9,7 +9,7 @@ import './aurora.css'
 // Apply the persisted scheme before React mounts. Child effects construct the
 // terminal (and read CSS custom properties) before App's effect toggles `.dark`,
 // which otherwise leaves the first terminal painted with the light palette.
-if (preference<'light' | 'dark'>('theme', 'dark') === 'dark') {
+if (preference<'light' | 'dark'>('theme', 'light') === 'dark') {
   document.documentElement.classList.add('dark')
 }
 

@@ -47,7 +47,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [selectedSessionId, setSelectedSessionId] = useState(() => preference('restore', true) ? preference('selectedSession', '') : '')
   const [historyScope, setHistoryScope] = useState<{ sessionId?: string; eventId?: string }>({})
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => preference('theme', 'dark'))
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => preference('theme', 'light'))
   const [font, setFont] = useState(() => preference('font', 'JetBrains Mono'))
   const [fontSize, setFontSize] = useState(() => preference('fontSize', '13'))
   const [sidebar, setSidebar] = useState(() => !window.matchMedia('(max-width: 580px)').matches)

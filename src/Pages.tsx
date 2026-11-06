@@ -376,7 +376,7 @@ export function SettingsPage() {
                 <p>安静的界面，让注意力回到终端。</p>
               </div>
               <div className="theme-previews">
-                {(['dark', 'light'] as const).map((value) => (
+                {(['light', 'dark'] as const).map((value) => (
                   <button
                     key={value}
                     aria-pressed={theme === value}
@@ -398,7 +398,7 @@ export function SettingsPage() {
                     </span>
                     <span>
                       {value === 'dark' ? <Moon size={13} /> : <Sun size={13} />}
-                      {value === 'dark' ? '深色' : '浅色'}
+                      {value === 'dark' ? '墨蓝 · 靛青' : '纯白 · 靛蓝'}
                       {theme === value && <Check size={13} />}
                     </span>
                   </button>
