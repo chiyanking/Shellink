@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { useState, type DragEvent } from 'react'
 import {
   ArrowUpRight, Bot, ChevronDown, Code2, Copy, FileClock, Globe, Keyboard,
-  LayoutGrid, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
+  FolderPlus, LayoutGrid, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
   Terminal, Workflow,
 } from 'lucide-react'
 import { useDesign, type SettingsTab } from './context'
 import { shortTime } from './data'
-import { Badge, Button, Hint } from './components/ui'
+import { Badge, Hint, Input } from './components/ui'
 import { cn } from './lib/utils'
+import { connectionDragProps } from './connection-drag'
 
 export const navigation = [
   { id: 'workspace', label: '工作台', title: 'Workspace', icon: Terminal, shortcut: '1' },
@@ -42,15 +43,47 @@ export function ContextPanel() {
   const {
     page, sessions, selectedSession, openSession, openModal, connections, openConnection,
     connectionFilter, setConnectionFilter, connectionGroup, setConnectionGroup,
+    connectionGroups, addConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
     mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime, notify,
   } = useDesign()
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<string[]>([])
+  const [dropGroup, setDropGroup] = useState<string | null>(null)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [creatingGroup, setCreatingGroup] = useState(false)
+  const [groupError, setGroupError] = useState('')
   const active = sessions.filter(session => session.status !== 'ended')
   const ended = sessions.filter(session => session.status === 'ended')
   const profiles = connections.filter(connection => !connection.archived)
-  const groups = [...new Set(profiles.map(connection => connection.group))]
+  const groups = connectionGroups.filter(group => draggedConnectionId || profiles.some(connection => connection.group === group))
   const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase())
+  function dropProps(group: string) {
+    return {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (!draggedConnectionId) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        setDropGroup(group)
+      },
+      onDragLeave: (event: DragEvent<HTMLElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropGroup(null)
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (!draggedConnectionId) return
+        event.preventDefault()
+        moveConnectionToGroup(draggedConnectionId, group)
+        setDraggedConnectionId(null)
+        setDropGroup(null)
+      },
+    }
+  }
+  function connectionList(group: string) {
+    return profiles.filter(connection => connection.group === group && (connectionFilter === 'all' || connection.type === connectionFilter)).map(connection => <button
+      className={cn('context-item context-connection', draggedConnectionId === connection.id && 'is-dragging')}
+      key={connection.id} onClick={() => openConnection(connection.id)} title={`${connection.name} · ${connection.host} · 可拖动到分组`}
+      {...connectionDragProps(connection.id, setDraggedConnectionId)}
+    ><span className={cn('context-dot', connection.connected ? 'is-live' : 'is-ended')} /><span className="context-item-text"><strong>{connection.name}</strong></span><span className="context-count">{connection.type}</span></button>)
+  }
   function sessionList(items: typeof sessions) {
     return items.filter(session => matches(`${session.name} ${session.id}`)).map(session => {
       const selected = page === 'history' ? historyScope.sessionId === session.id : selectedSession.id === session.id
@@ -77,7 +110,6 @@ export function ContextPanel() {
   }
   return <aside className="context-panel" aria-label={`${page === 'workspace' ? '会话' : page === 'connections' ? '连接' : page === 'integrations' ? 'AI 接入' : page === 'history' ? '历史' : '设置'}侧面板`}>
     <div className="context-heading"><span>{page === 'workspace' ? '会话' : page === 'connections' ? '连接' : page === 'integrations' ? 'AI 客户端' : page === 'history' ? '终端历史' : '偏好设置'}</span>
-      {(page === 'workspace' || page === 'connections') && <Button size="sm" onClick={() => openModal(page === 'workspace' ? 'session' : 'connection')}><Plus size={12} />{page === 'workspace' ? '新建' : '新增'}</Button>}
     </div>
     <div className="context-scroll">
       {(page === 'workspace' || page === 'history') && <>
@@ -89,11 +121,31 @@ export function ContextPanel() {
       </>}
       {page === 'connections' && <>
         <div className="context-chip-row">{(['all', 'SSH', 'Local'] as const).map(filter => <button key={filter} className={cn('context-chip', connectionFilter === filter && 'is-active')} aria-pressed={connectionFilter === filter} onClick={() => setConnectionFilter(filter)}>{filter === 'all' ? '全部' : filter === 'Local' ? '本地' : 'SSH'}<span>{profiles.filter(connection => filter === 'all' || connection.type === filter).length}</span></button>)}</div>
-        <button className={cn('context-item', connectionGroup === 'all' && 'is-active')} onClick={() => setConnectionGroup('all')}><LayoutGrid size={14} /><span className="context-item-text">全部分组</span><span className="context-count">{profiles.length}</span></button>
-        {groups.map(group => <section className="context-group" key={group}>
-          <button className="context-label context-group-toggle" onClick={() => setCollapsed(current => current.includes(group) ? current.filter(value => value !== group) : [...current, group])} aria-expanded={!collapsed.includes(group)}><ChevronDown size={11} className={collapsed.includes(group) ? 'is-collapsed' : ''} />{group}<span>{profiles.filter(connection => connection.group === group).length}</span></button>
-          {!collapsed.includes(group) && <><button className={cn('context-item context-group-filter', connectionGroup === group && 'is-active')} onClick={() => setConnectionGroup(group)}>查看此分组<ArrowUpRight size={11} /></button>{profiles.filter(connection => connection.group === group && (connectionFilter === 'all' || connection.type === connectionFilter)).map(connection => <button className="context-item" key={connection.id} onClick={() => openConnection(connection.id)} title={connection.host}><span className={cn('context-dot', connection.connected ? 'is-live' : 'is-ended')} /><span className="context-item-text"><strong>{connection.name}</strong></span><span className="context-count">{connection.type}</span></button>)}</>}
+        <button className={cn('context-item', connectionGroup === null && 'is-active')} onClick={() => setConnectionGroup(null)}><LayoutGrid size={14} /><span className="context-item-text">全部连接</span><span className="context-count">{profiles.length}</span></button>
+        <section className={cn('context-group context-ungrouped', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === '' && 'is-drop-target')} aria-label="分组外的连接" {...dropProps('')}>
+          {connectionList('')}
+          {draggedConnectionId && <p className="context-drop-hint">拖到这里移出分组</p>}
+        </section>
+        {groups.map(group => <section className={cn('context-group context-connection-group', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === group && 'is-drop-target')} key={group} aria-label={`连接分组 ${group}`} {...dropProps(group)}>
+          <div className={cn('context-group-heading', connectionGroup === group && 'is-active')}>
+            <button className="context-group-toggle" onClick={() => setCollapsed(current => current.includes(group) ? current.filter(value => value !== group) : [...current, group])} aria-label={`${collapsed.includes(group) ? '展开' : '收起'}分组 ${group}`} aria-expanded={!collapsed.includes(group)}><ChevronDown size={12} className={collapsed.includes(group) ? 'is-collapsed' : ''} /></button>
+            <button className="context-group-select" aria-pressed={connectionGroup === group} onClick={() => { setConnectionGroup(group); setCollapsed(current => current.filter(value => value !== group)) }}><strong title={group}>{group}</strong><span>{profiles.filter(connection => connection.group === group).length}</span></button>
+          </div>
+          {!collapsed.includes(group) && connectionList(group)}
+          {draggedConnectionId && !profiles.some(connection => connection.group === group) && <p className="context-drop-hint">拖到这里加入分组</p>}
         </section>)}
+        {creatingGroup ? <form className="context-group-create" aria-label="新建分组" onSubmit={event => {
+          event.preventDefault()
+          const error = addConnectionGroup(newGroupName)
+          setGroupError(error ?? '')
+          if (!error) { setNewGroupName(''); setCreatingGroup(false); notify('分组已创建，拖动连接时可移入') }
+        }}>
+          <FolderPlus size={14} />
+          <Input autoFocus aria-label="分组名称" placeholder="分组名称，回车创建" value={newGroupName} maxLength={50} onChange={event => { setNewGroupName(event.target.value); setGroupError('') }} onKeyDown={event => {
+            if (event.key === 'Escape') { event.preventDefault(); setCreatingGroup(false); setNewGroupName(''); setGroupError('') }
+          }} onBlur={() => { setCreatingGroup(false); setNewGroupName(''); setGroupError('') }} />
+        </form> : <button className="context-add-group" onClick={() => setCreatingGroup(true)}><Plus size={13} />新建分组</button>}
+        {groupError && <p className="context-group-error" role="alert">{groupError}</p>}
       </>}
       {page === 'integrations' && <>
         {(['Claude Code', 'Cursor', 'Codex'] as const).map(name => <button className={cn('context-item context-client', client === name && 'is-active')} aria-pressed={client === name} key={name} onClick={() => setClient(name)}><span className={cn('context-client-glyph', `glyph-${name.split(' ')[0].toLowerCase()}`)}>{name === 'Claude Code' ? '✳' : name === 'Cursor' ? '◈' : '⌘'}</span><span className="context-item-text">{name}</span>{client === name && <Badge tone="blue">配置中</Badge>}</button>)}

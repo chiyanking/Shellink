@@ -24,7 +24,6 @@ import {
   Sun,
   Terminal,
   Trash2,
-  Upload,
   Workflow,
   Zap,
 } from 'lucide-react'
@@ -33,25 +32,24 @@ import { Badge, Button, Input, Menu, Select, Switch } from './components/ui'
 import { cn } from './lib/utils'
 import { PageHeading } from './Workspace'
 import { settingsNavigation } from './Navigation'
+import { connectionDragProps } from './connection-drag'
 
 export function ConnectionsPage() {
   const {
     connections, openConnection, openModal, notify, sessions, inspectHistory, editConnection, deleteConnection,
     connectionFilter: filter, setConnectionFilter: setFilter, connectionGroup, setConnectionGroup,
+    draggedConnectionId, setDraggedConnectionId,
   } = useDesign()
   const [search, setSearch] = useState('')
   const [sortByName, setSortByName] = useState(false)
   const profiles = connections.filter(item => !item.archived)
   const shown = profiles.filter(item =>
-    (filter === 'all' || item.type === filter) && (connectionGroup === 'all' || item.group === connectionGroup) &&
+    (filter === 'all' || item.type === filter) && (connectionGroup === null || item.group === connectionGroup) &&
     `${item.name} ${item.host} ${item.group}`.toLowerCase().includes(search.toLowerCase()),
   ).sort((a, b) => sortByName ? a.name.localeCompare(b.name) : 0)
   const active = sessions.filter(session => session.status !== 'ended')
   return <div className="standard-page connections-page">
-    <PageHeading eyebrow="YOUR INFRASTRUCTURE" title="连接管理" description={`${profiles.length} 个连接 · ${profiles.filter(item => item.connected).length} 个连接有活跃会话 · 随时连接，继续工作。`}>
-      <Button variant="outline" onClick={() => openModal('import')}><Upload size={14} />导入连接</Button>
-      <Button onClick={() => openModal('connection')}><Plus size={14} />新增连接</Button>
-    </PageHeading>
+    <PageHeading eyebrow="YOUR INFRASTRUCTURE" title="连接管理" description={`${profiles.length} 个连接 · ${profiles.filter(item => item.connected).length} 个连接有活跃会话 · 随时连接，继续工作。`} />
     <div className="connection-stats">
       {[
         { value: profiles.length, label: '全部连接', icon: Server, tone: '' },
@@ -66,7 +64,7 @@ export function ConnectionsPage() {
         { id: 'SSH', label: 'SSH', count: profiles.filter(item => item.type === 'SSH').length },
         { id: 'Local', label: '本地', count: profiles.filter(item => item.type === 'Local').length },
       ] as const).map(tab => <button key={tab.id} onClick={() => setFilter(tab.id)} aria-pressed={filter === tab.id} className={filter === tab.id ? 'is-active' : ''}>{tab.label}<span>{tab.count}</span></button>)}
-        {connectionGroup !== 'all' && <button className="group-filter-chip" onClick={() => setConnectionGroup('all')}>{connectionGroup}<X size={11} /></button>}
+        {connectionGroup !== null && <button className="group-filter-chip" onClick={() => setConnectionGroup(null)}>{connectionGroup || '未分组'}<X size={11} /></button>}
       </div>
       <div className="toolbar-right">
         <label className="search-input"><Search size={14} /><Input placeholder="搜索名称、地址或分组…" value={search} onChange={event => setSearch(event.target.value)} aria-label="搜索连接" /></label>
@@ -81,7 +79,7 @@ export function ConnectionsPage() {
         const activeSessions = active.filter(session => session.connectionId === connection.id)
         const latestSession = sessions.filter(session => session.connectionId === connection.id).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0]
         const address = connection.type === 'SSH' ? `${connection.user}@${connection.host}:${connection.port}` : connection.command ?? 'localhost'
-        return <article key={connection.id} className={cn('server-card', activeSessions.length > 0 && 'is-live')}>
+        return <article key={connection.id} className={cn('server-card', activeSessions.length > 0 && 'is-live', draggedConnectionId === connection.id && 'is-dragging')} {...connectionDragProps(connection.id, setDraggedConnectionId)}>
           <div className="server-card-top">
             <span className={cn('server-glyph', `color-${connection.color}`)}>{connection.type === 'Local' ? <Terminal size={20} /> : <Server size={20} />}</span>
             <div className="server-card-name"><h2 title={connection.name}>{connection.name}</h2><p title={address}>{address}</p></div>
@@ -92,13 +90,13 @@ export function ConnectionsPage() {
               { label: '删除连接配置', icon: <Trash2 size={14} />, danger: true, onSelect: () => { if (window.confirm(`删除连接“${connection.name}”？现有会话和历史会保留。`)) void deleteConnection(connection.id) } },
             ]} />
           </div>
-          <div className="server-card-tags"><span className={cn('environment-tag', connection.group === 'Production' ? 'is-production' : connection.type === 'Local' ? 'is-local' : 'is-development')}>{connection.group}</span><Badge>{connection.type === 'SSH' ? 'SSH' : 'LOCAL'}</Badge>{connection.profile?.authType && connection.type === 'SSH' && <span className="server-auth"><ShieldCheck size={11} />{connection.profile.authType === 'key' ? '密钥' : connection.profile.authType.includes('mfa') || connection.profile.authType === 'keyboard-interactive' ? 'MFA / 2FA' : '密码'}</span>}</div>
+          <div className="server-card-tags">{connection.group && <span className={cn('environment-tag', connection.group === 'Production' ? 'is-production' : connection.type === 'Local' ? 'is-local' : 'is-development')}>{connection.group}</span>}<Badge>{connection.type === 'SSH' ? 'SSH' : 'LOCAL'}</Badge>{connection.profile?.authType && connection.type === 'SSH' && <span className="server-auth"><ShieldCheck size={11} />{connection.profile.authType === 'key' ? '密钥' : connection.profile.authType.includes('mfa') || connection.profile.authType === 'keyboard-interactive' ? 'MFA / 2FA' : '密码'}</span>}</div>
           <div className="server-card-bottom"><span className={cn('server-session-state', !activeSessions.length && 'is-idle')}><span className="status-dot" />{activeSessions.length ? `${activeSessions.length} 个活跃会话` : '尚无活跃会话'}</span><Button size="sm" variant={activeSessions.length ? 'default' : 'outline'} onClick={() => openConnection(connection.id)}>{activeSessions.length ? '打开终端' : '连接'}<ArrowUpRight size={12} /></Button></div>
         </article>
       })}
       {(shown.length > 0 || profiles.length === 0) && <button className="new-connection-card" onClick={() => openModal('connection')}><span><Plus size={22} /></span><strong>添加新连接</strong><small>SSH 主机或本地终端</small></button>}
     </div>
-    {!shown.length && profiles.length > 0 && <div className="empty-state"><Search size={25} /><h3>没有匹配的连接</h3><p>试试其他名称、地址或分组。</p><Button variant="outline" onClick={() => { setSearch(''); setFilter('all'); setConnectionGroup('all') }}>清除筛选</Button></div>}
+    {!shown.length && profiles.length > 0 && <div className="empty-state"><Search size={25} /><h3>没有匹配的连接</h3><p>试试其他名称、地址或分组。</p><Button variant="outline" onClick={() => { setSearch(''); setFilter('all'); setConnectionGroup(null) }}>清除筛选</Button></div>}
     <div className="table-footer"><span>共 {shown.length} 个连接</span><span><ShieldCheck size={13} />连接信息仅保存在本地</span></div>
     <section className="import-banner"><div className="import-banner-icon"><FolderOpen size={22} /></div><div><h3>把熟悉的连接带过来</h3><p>导入 Shellink 连接 JSON，继续使用已有的主机配置。</p></div><Button variant="outline" onClick={() => openModal('import')}>导入配置<ArrowRight size={14} /></Button></section>
   </div>

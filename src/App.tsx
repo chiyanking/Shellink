@@ -56,7 +56,9 @@ export default function App() {
   const [toast, setToast] = useState('')
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [connectionFilter, setConnectionFilter] = useState<ConnectionFilter>('all')
-  const [connectionGroupFilter, setConnectionGroupFilter] = useState('all')
+  const [connectionGroupFilter, setConnectionGroupFilter] = useState<string | null>(null)
+  const [definedConnectionGroups, setDefinedConnectionGroups] = useState(() => preference<string[]>('connectionGroups', []))
+  const [draggedConnectionId, setDraggedConnectionId] = useState<string | null>(null)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
   const [client, setClient] = useState<AIClient>('Claude Code')
   const [commandQuery, setCommandQuery] = useState('')
@@ -64,7 +66,7 @@ export default function App() {
   const [newSessionName, setNewSessionName] = useState('')
   const [connectionType, setConnectionType] = useState('SSH')
   const [authType, setAuthType] = useState('password')
-  const [connectionGroup, setConnectionGroup] = useState('Development')
+  const [connectionGroup, setConnectionGroup] = useState('')
   const [editingId, setEditingId] = useState('')
   const [saving, setSaving] = useState(false)
   const [importText, setImportText] = useState('')
@@ -72,6 +74,7 @@ export default function App() {
   const selected = connections.find(item => item.id === selectedSession.connectionId) ?? emptyConnection
   const manual = selectedSession.mode === 'MANUAL'
   const activeSessionCount = sessions.filter(item => item.status !== 'ended').length
+  const connectionGroups = [...new Set([...definedConnectionGroups, ...connections.filter(item => !item.archived).map(item => item.group)])].filter(Boolean)
   const refreshBusy = useRef(false)
   const notify = useCallback((text: string) => {
     setToast(text)
@@ -152,7 +155,34 @@ export default function App() {
     setEditingId(id); setConnectionType(profile.connectType === 'command' ? 'Local' : 'SSH'); setAuthType(profile.authType); setConnectionGroup(connections.find(item => item.id === id)!.group); setModal('connection')
   }
   async function deleteConnection(id: string) {
-    try { await rpc('profiles.delete', { id }); await refresh(); notify('已删除连接配置，现有会话与记录保留。') } catch (error) { notify(errorText(error)) }
+    try { await rpc('profiles.delete', { id }); storeConnectionGroups(connectionGroups); await refresh(); notify('已删除连接配置，现有会话与记录保留。') } catch (error) { notify(errorText(error)) }
+  }
+  function storeConnectionGroups(groups: string[]) {
+    savePreference('connectionGroups', groups)
+    setDefinedConnectionGroups(groups)
+  }
+  function addConnectionGroup(name: string) {
+    const trimmed = name.trim()
+    if (!trimmed) return '请输入分组名称'
+    if (trimmed.length > 50) return '分组名称不能超过 50 个字符'
+    if (connectionGroups.some(group => group.toLocaleLowerCase() === trimmed.toLocaleLowerCase())) return '这个分组名称已存在'
+    storeConnectionGroups([...connectionGroups, trimmed])
+    return null
+  }
+  function moveConnectionToGroup(id: string, group: string) {
+    const connection = connections.find(item => item.id === id && !item.archived)
+    if (!connection || connection.group === group || (group && !connectionGroups.includes(group))) return
+    storeConnectionGroups(connectionGroups)
+    savePreference(`group.${id}`, group)
+    setConnections(current => current.map(item => item.id === id ? { ...item, group } : item))
+    notify(group ? `已将“${connection.name}”移入“${group}”` : `已将“${connection.name}”移到分组外`)
+  }
+  function openModal(next: Modal) {
+    if (next === 'commands') setCommandQuery('')
+    if (next === 'connection') {
+      setEditingId(''); setConnectionType('SSH'); setAuthType('password'); setConnectionGroup(connectionGroupFilter ?? '')
+    }
+    setModal(next)
   }
   const editProfile = connections.find(item => item.id === editingId)?.profile
   useEffect(() => { if (modal !== 'connection') setEditingId('') }, [modal])
@@ -177,6 +207,7 @@ export default function App() {
       value={{
         coreEpoch, coreReady, connections, runtime, mcp, refresh, editConnection, deleteConnection, font, fontSize, setFont, setFontSize,
         connectionFilter, setConnectionFilter, connectionGroup: connectionGroupFilter, setConnectionGroup: setConnectionGroupFilter, settingsTab, setSettingsTab, client, setClient,
+        connectionGroups, addConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
         page,
         navigate,
         selected,
@@ -192,7 +223,7 @@ export default function App() {
         setManual,
         split,
         setSplit,
-        openModal: (next) => { if (next === 'commands') setCommandQuery(''); setModal(next) },
+        openModal,
         notify,
         theme,
         setTheme,
@@ -292,7 +323,7 @@ export default function App() {
               const body: Record<string, unknown> = { name: String(fields.get('name')), connectType: connectionType === 'SSH' ? 'ssh' : 'command' }
               if (connectionType === 'SSH') { Object.assign(body, { host: String(fields.get('host')), port: Number(fields.get('port') || 22), username: String(fields.get('username')), authType }); const secret = String(fields.get('secret') || ''); if (secret && authType !== 'keyboard-interactive') body[authType === 'key' ? 'privateKey' : 'password'] = secret; const passphrase = String(fields.get('passphrase') || ''); if (passphrase && authType === 'key') body.passphrase = passphrase }
               else body.command = String(fields.get('command'))
-              try { const result = await rpc<Profile>(editingId ? 'profiles.update' : 'profiles.create', editingId ? { id: editingId, profile: body } : body); savePreference(`group.${result.id}`, connectionType === 'Local' ? 'Local' : connectionGroup); await refresh(); setModal(null); notify('连接配置已保存') } catch (error) { notify(errorText(error)) } finally { setSaving(false) }
+              try { const result = await rpc<Profile>(editingId ? 'profiles.update' : 'profiles.create', editingId ? { id: editingId, profile: body } : body); storeConnectionGroups(connectionGroups); savePreference(`group.${result.id}`, connectionGroup); await refresh(); setModal(null); notify('连接配置已保存') } catch (error) { notify(errorText(error)) } finally { setSaving(false) }
             }}
           >
             <div className="form-type-tabs">
@@ -317,6 +348,10 @@ export default function App() {
               连接名称
               <Input name="name" placeholder="例如 prod-web-01" defaultValue={editProfile?.name} required />
             </label>
+            <label className="form-field">
+              分组
+              <Select label="连接分组" value={connectionGroup} onChange={setConnectionGroup} options={[{ value: '', label: '不分组' }, ...connectionGroups.map(value => ({ value, label: value }))]} />
+            </label>
             {connectionType === 'SSH' ? (
               <>
                 <div className="form-row">
@@ -333,34 +368,20 @@ export default function App() {
                   用户名
                   <Input name="username" placeholder="deploy" defaultValue={editProfile?.username} required />
                 </label>
-                <div className="form-row">
-                  <label className="form-field">
-                    认证方式
-                    <Select
-                      label="认证方式"
-                      value={authType}
-                      onChange={setAuthType}
-                      options={[
-                        { value: 'key', label: 'SSH 密钥' },
-                        { value: 'password', label: '密码' },
-                        { value: 'password-mfa', label: '密码 + MFA / 2FA' },
-                        { value: 'keyboard-interactive', label: '交互认证（MFA / 2FA）' },
-                      ]}
-                    />
-                  </label>
-                  <label className="form-field">
-                    分组
-                    <Select
-                      label="连接分组"
-                      value={connectionGroup}
-                      onChange={setConnectionGroup}
-                      options={['Production', 'Development', 'Local'].map((value) => ({
-                        value,
-                        label: value,
-                      }))}
-                    />
-                  </label>
-                </div>
+                <label className="form-field">
+                  认证方式
+                  <Select
+                    label="认证方式"
+                    value={authType}
+                    onChange={setAuthType}
+                    options={[
+                      { value: 'key', label: 'SSH 密钥' },
+                      { value: 'password', label: '密码' },
+                      { value: 'password-mfa', label: '密码 + MFA / 2FA' },
+                      { value: 'keyboard-interactive', label: '交互认证（MFA / 2FA）' },
+                    ]}
+                  />
+                </label>
                 {authType !== 'keyboard-interactive' && <label className="form-field">
                   {authType === 'key' ? '私钥内容（留空保留原密钥）' : '密码（留空保留原密码）'}
                   {authType === 'key' ? <textarea name="secret" rows={4} className="ui-input" placeholder="粘贴 PEM / OpenSSH 私钥内容" /> : <Input name="secret" autoComplete="new-password" placeholder="输入密码" type="password" />}
@@ -408,7 +429,7 @@ export default function App() {
             />
           </label>
           <div className="session-picker">
-            {!connections.some(connection => !connection.archived) && <div className="session-picker-empty"><Server size={24} /><strong>先添加一个连接</strong><p>添加 SSH 主机或本地 Shell，再创建终端会话。</p><Button variant="outline" onClick={() => setModal('connection')}><Plus size={13} />添加连接</Button></div>}
+            {!connections.some(connection => !connection.archived) && <div className="session-picker-empty"><Server size={24} /><strong>先添加一个连接</strong><p>添加 SSH 主机或本地 Shell，再创建终端会话。</p><Button variant="outline" onClick={() => openModal('connection')}><Plus size={13} />添加连接</Button></div>}
             {connections.filter(c => !c.archived).map((connection) => (
               <button
                 key={connection.id}

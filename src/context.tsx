@@ -12,8 +12,13 @@ export type DesignContext = {
   connections: Connection[]
   connectionFilter: ConnectionFilter
   setConnectionFilter: (filter: ConnectionFilter) => void
-  connectionGroup: string
-  setConnectionGroup: (group: string) => void
+  connectionGroup: string | null
+  setConnectionGroup: (group: string | null) => void
+  connectionGroups: string[]
+  addConnectionGroup: (name: string) => string | null
+  moveConnectionToGroup: (id: string, group: string) => void
+  draggedConnectionId: string | null
+  setDraggedConnectionId: (id: string | null) => void
   settingsTab: SettingsTab
   setSettingsTab: (tab: SettingsTab) => void
   client: AIClient

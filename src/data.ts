@@ -19,7 +19,7 @@ export function shortTime(at: number) {
 }
 export function connectionFrom(profile: Profile, sessions: SessionRecord[]): Connection {
   const local = profile.connectType === 'command'
-  return { id: profile.id, name: profile.name, host: local ? 'localhost' : profile.host, user: local ? '' : profile.username, port: profile.port, group: preference(`group.${profile.id}`, local ? 'Local' : 'Development'), type: local ? 'Local' : 'SSH', color: local ? 'green' : 'blue', connected: sessions.some(s => s.profileId === profile.id && s.active), system: local ? profile.command ?? '' : 'SSH', command: profile.command ?? '', profile }
+  return { id: profile.id, name: profile.name, host: local ? 'localhost' : profile.host, user: local ? '' : profile.username, port: profile.port, group: preference(`group.${profile.id}`, ''), type: local ? 'Local' : 'SSH', color: local ? 'green' : 'blue', connected: sessions.some(s => s.profileId === profile.id && s.active), system: local ? profile.command ?? '' : 'SSH', command: profile.command ?? '', profile }
 }
 export function sessionFrom(s: SessionRecord): Session {
   const source = s.source === 'desktop' ? '你' : s.source === 'mcp' ? 'MCP' : '未知'
