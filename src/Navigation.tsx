@@ -2,7 +2,7 @@ import { useState, type DragEvent } from 'react'
 import {
   ArrowUpRight, Bot, ChevronDown, Code2, Copy, FileClock, Globe, Keyboard,
   FolderPlus, LayoutGrid, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
-  Terminal, Workflow,
+  Terminal, Trash2, Workflow,
 } from 'lucide-react'
 import { useDesign, type SettingsTab } from './context'
 import { shortTime } from './data'
@@ -41,9 +41,9 @@ export function NavigationRail() {
 
 export function ContextPanel() {
   const {
-    page, sessions, selectedSession, openSession, openModal, connections, openConnection,
-    connectionFilter, setConnectionFilter, connectionGroup, setConnectionGroup,
-    connectionGroups, addConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
+    page, sessions, selectedSession, openSession, openModal, connections, openConnection, editConnection,
+    connectionGroup, setConnectionGroup,
+    connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
     mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime, notify,
   } = useDesign()
   const [search, setSearch] = useState('')
@@ -55,7 +55,6 @@ export function ContextPanel() {
   const active = sessions.filter(session => session.status !== 'ended')
   const ended = sessions.filter(session => session.status === 'ended')
   const profiles = connections.filter(connection => !connection.archived)
-  const groups = connectionGroups.filter(group => draggedConnectionId || profiles.some(connection => connection.group === group))
   const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase())
   function dropProps(group: string) {
     return {
@@ -78,9 +77,9 @@ export function ContextPanel() {
     }
   }
   function connectionList(group: string) {
-    return profiles.filter(connection => connection.group === group && (connectionFilter === 'all' || connection.type === connectionFilter)).map(connection => <button
+    return profiles.filter(connection => connection.group === group).map(connection => <button
       className={cn('context-item context-connection', draggedConnectionId === connection.id && 'is-dragging')}
-      key={connection.id} onClick={() => openConnection(connection.id)} title={`${connection.name} · ${connection.host} · 可拖动到分组`}
+      key={connection.id} onClick={() => editConnection(connection.id)} title={`${connection.name} · ${connection.host} · 点击编辑，可拖动到分组`}
       {...connectionDragProps(connection.id, setDraggedConnectionId)}
     ><span className={cn('context-dot', connection.connected ? 'is-live' : 'is-ended')} /><span className="context-item-text"><strong>{connection.name}</strong></span><span className="context-count">{connection.type}</span></button>)
   }
@@ -120,16 +119,22 @@ export function ContextPanel() {
         {page === 'workspace' && <div className="context-group"><div className="context-label">快速连接 <span>{profiles.length}</span></div>{profiles.slice(0, 5).map(connection => <button className="context-item" key={connection.id} onClick={() => openConnection(connection.id)}><Server size={13} /><span className="context-item-text"><strong>{connection.name}</strong></span><ArrowUpRight size={12} /></button>)}{!profiles.length && <button className="context-text-button" onClick={() => openModal('connection')}><Plus size={12} />添加你的第一个连接</button>}</div>}
       </>}
       {page === 'connections' && <>
-        <div className="context-chip-row">{(['all', 'SSH', 'Local'] as const).map(filter => <button key={filter} className={cn('context-chip', connectionFilter === filter && 'is-active')} aria-pressed={connectionFilter === filter} onClick={() => setConnectionFilter(filter)}>{filter === 'all' ? '全部' : filter === 'Local' ? '本地' : 'SSH'}<span>{profiles.filter(connection => filter === 'all' || connection.type === filter).length}</span></button>)}</div>
         <button className={cn('context-item', connectionGroup === null && 'is-active')} onClick={() => setConnectionGroup(null)}><LayoutGrid size={14} /><span className="context-item-text">全部连接</span><span className="context-count">{profiles.length}</span></button>
         <section className={cn('context-group context-ungrouped', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === '' && 'is-drop-target')} aria-label="分组外的连接" {...dropProps('')}>
           {connectionList('')}
           {draggedConnectionId && <p className="context-drop-hint">拖到这里移出分组</p>}
         </section>
-        {groups.map(group => <section className={cn('context-group context-connection-group', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === group && 'is-drop-target')} key={group} aria-label={`连接分组 ${group}`} {...dropProps(group)}>
+        {connectionGroups.map(group => <section className={cn('context-group context-connection-group', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === group && 'is-drop-target')} key={group} aria-label={`连接分组 ${group}`} {...dropProps(group)}>
           <div className={cn('context-group-heading', connectionGroup === group && 'is-active')}>
             <button className="context-group-toggle" onClick={() => setCollapsed(current => current.includes(group) ? current.filter(value => value !== group) : [...current, group])} aria-label={`${collapsed.includes(group) ? '展开' : '收起'}分组 ${group}`} aria-expanded={!collapsed.includes(group)}><ChevronDown size={12} className={collapsed.includes(group) ? 'is-collapsed' : ''} /></button>
             <button className="context-group-select" aria-pressed={connectionGroup === group} onClick={() => { setConnectionGroup(group); setCollapsed(current => current.filter(value => value !== group)) }}><strong title={group}>{group}</strong><span>{profiles.filter(connection => connection.group === group).length}</span></button>
+            <Hint label="删除分组"><button className="context-group-delete" aria-label={`删除分组 ${group}`} onClick={() => {
+              const count = profiles.filter(connection => connection.group === group).length
+              if (!count || window.confirm(`删除分组“${group}”？其中 ${count} 个连接会移到分组外，连接配置会保留。`)) {
+                deleteConnectionGroup(group)
+                setCollapsed(current => current.filter(value => value !== group))
+              }
+            }}><Trash2 size={12} /></button></Hint>
           </div>
           {!collapsed.includes(group) && connectionList(group)}
           {draggedConnectionId && !profiles.some(connection => connection.group === group) && <p className="context-drop-hint">拖到这里加入分组</p>}
@@ -138,7 +143,7 @@ export function ContextPanel() {
           event.preventDefault()
           const error = addConnectionGroup(newGroupName)
           setGroupError(error ?? '')
-          if (!error) { setNewGroupName(''); setCreatingGroup(false); notify('分组已创建，拖动连接时可移入') }
+          if (!error) { setNewGroupName(''); setCreatingGroup(false) }
         }}>
           <FolderPlus size={14} />
           <Input autoFocus aria-label="分组名称" placeholder="分组名称，回车创建" value={newGroupName} maxLength={50} onChange={event => { setNewGroupName(event.target.value); setGroupError('') }} onKeyDown={event => {

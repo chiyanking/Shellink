@@ -168,6 +168,10 @@
 .context-group-select { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 1; min-width: 0; padding: 5px 8px 5px 0; border: 0; background: transparent; color: inherit; text-align: left; font-size: 11px; }
 .context-group-select strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-weight: 600; }
 .context-group-select > span { flex-shrink: 0; font: 10px var(--font-mono); }
+.context-group-delete { display: grid; place-items: center; align-self: center; flex-shrink: 0; width: 23px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--subtle-foreground); opacity: 0; }
+.context-group-heading:hover .context-group-delete, .context-group-heading:focus-within .context-group-delete { opacity: 1; }
+.context-group-delete:hover { color: var(--red); background: var(--surface-hover); }
+@media (hover: none) { .context-group-delete { opacity: 1; } }
 .context-ungrouped:empty { display: none; }
 .context-connection-group, .context-ungrouped { border: 1px solid transparent; border-radius: 9px; }
 .context-group.is-drop-zone { min-height: 48px; border-color: var(--border-strong); border-style: dashed; }
@@ -175,10 +179,6 @@
 .context-drop-hint { padding: 9px 8px; color: var(--primary-text); text-align: center; font-size: 10px; pointer-events: none; }
 .context-connection[draggable='true'], .server-card[draggable='true'] { cursor: grab; }
 .context-connection.is-dragging, .server-card.is-dragging { opacity: .45; }
-.context-chip-row { display: flex; gap: 5px; flex-wrap: wrap; }
-.context-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 9px; border: 1px solid var(--border); border-radius: 12px; background: transparent; color: var(--muted-foreground); font-size: 10px; }
-.context-chip.is-active { border-color: transparent; background: var(--gradient-soft); color: var(--primary-text); }
-.context-chip span { font: 9px var(--font-mono); opacity: .8; }
 .context-spacer { flex: 1; min-height: 10px; }
 .context-card { flex-shrink: 0; padding: 13px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); }
 .context-card h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; font-size: 11px; font-weight: 600; }
@@ -265,7 +265,8 @@
 .filter-tabs > button { display: inline-flex; align-items: center; gap: 7px; min-height: 26px; padding: 4px 11px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--muted-foreground); font-size: 11px; }
 .filter-tabs > button.is-active { background: var(--gradient-soft); border-color: transparent; color: var(--primary-text); box-shadow: none; }
 .filter-tabs > button > span { background: transparent; font: 9px var(--font-mono); padding: 0; color: inherit; }
-.group-filter-chip { color: var(--primary-text) !important; }
+.connections-group-filter { display: flex; min-width: 0; }
+.group-filter-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--primary-soft); color: var(--primary-text); font-size: 11px; overflow-wrap: anywhere; }
 .search-input { background: var(--surface); border-radius: 8px; }
 .search-input .ui-input { font-size: 11px; }
 .connection-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }

@@ -37,17 +37,18 @@ import { connectionDragProps } from './connection-drag'
 export function ConnectionsPage() {
   const {
     connections, openConnection, openModal, notify, sessions, inspectHistory, editConnection, deleteConnection,
-    connectionFilter: filter, setConnectionFilter: setFilter, connectionGroup, setConnectionGroup,
+    connectionGroup, setConnectionGroup,
     draggedConnectionId, setDraggedConnectionId,
   } = useDesign()
   const [search, setSearch] = useState('')
   const [sortByName, setSortByName] = useState(false)
   const profiles = connections.filter(item => !item.archived)
   const shown = profiles.filter(item =>
-    (filter === 'all' || item.type === filter) && (connectionGroup === null || item.group === connectionGroup) &&
+    (connectionGroup === null || item.group === connectionGroup) &&
     `${item.name} ${item.host} ${item.group}`.toLowerCase().includes(search.toLowerCase()),
   ).sort((a, b) => sortByName ? a.name.localeCompare(b.name) : 0)
   const active = sessions.filter(session => session.status !== 'ended')
+  const emptyGroup = connectionGroup !== null && !profiles.some(item => item.group === connectionGroup)
   return <div className="standard-page connections-page">
     <PageHeading eyebrow="YOUR INFRASTRUCTURE" title="连接管理" description={`${profiles.length} 个连接 · ${profiles.filter(item => item.connected).length} 个连接有活跃会话 · 随时连接，继续工作。`} />
     <div className="connection-stats">
@@ -59,11 +60,7 @@ export function ConnectionsPage() {
       ].map(stat => <div className={`connection-stat tone-${stat.tone}`} key={stat.label}><div><strong>{stat.value.toString().padStart(2, '0')}</strong><stat.icon size={17} /></div><span>{stat.label}</span></div>)}
     </div>
     <div className="connections-toolbar">
-      <div className="filter-tabs" aria-label="连接类型">{([
-        { id: 'all', label: '全部', count: profiles.length },
-        { id: 'SSH', label: 'SSH', count: profiles.filter(item => item.type === 'SSH').length },
-        { id: 'Local', label: '本地', count: profiles.filter(item => item.type === 'Local').length },
-      ] as const).map(tab => <button key={tab.id} onClick={() => setFilter(tab.id)} aria-pressed={filter === tab.id} className={filter === tab.id ? 'is-active' : ''}>{tab.label}<span>{tab.count}</span></button>)}
+      <div className="connections-group-filter">
         {connectionGroup !== null && <button className="group-filter-chip" onClick={() => setConnectionGroup(null)}>{connectionGroup || '未分组'}<X size={11} /></button>}
       </div>
       <div className="toolbar-right">
@@ -94,9 +91,10 @@ export function ConnectionsPage() {
           <div className="server-card-bottom"><span className={cn('server-session-state', !activeSessions.length && 'is-idle')}><span className="status-dot" />{activeSessions.length ? `${activeSessions.length} 个活跃会话` : '尚无活跃会话'}</span><Button size="sm" variant={activeSessions.length ? 'default' : 'outline'} onClick={() => openConnection(connection.id)}>{activeSessions.length ? '打开终端' : '连接'}<ArrowUpRight size={12} /></Button></div>
         </article>
       })}
-      {(shown.length > 0 || profiles.length === 0) && <button className="new-connection-card" onClick={() => openModal('connection')}><span><Plus size={22} /></span><strong>添加新连接</strong><small>SSH 主机或本地终端</small></button>}
+      {!emptyGroup && (shown.length > 0 || profiles.length === 0) && <button className="new-connection-card" onClick={() => openModal('connection')}><span><Plus size={22} /></span><strong>添加新连接</strong><small>SSH 主机或本地终端</small></button>}
     </div>
-    {!shown.length && profiles.length > 0 && <div className="empty-state"><Search size={25} /><h3>没有匹配的连接</h3><p>试试其他名称、地址或分组。</p><Button variant="outline" onClick={() => { setSearch(''); setFilter('all'); setConnectionGroup(null) }}>清除筛选</Button></div>}
+    {emptyGroup && <div className="empty-state"><FolderOpen size={25} /><h3>此分组还没有连接</h3><p>将连接拖入此分组，或添加一个新连接。</p><Button variant="outline" onClick={() => openModal('connection')}><Plus size={13} />添加连接</Button></div>}
+    {!shown.length && profiles.length > 0 && !emptyGroup && <div className="empty-state"><Search size={25} /><h3>没有匹配的连接</h3><p>试试其他名称、地址或分组。</p><Button variant="outline" onClick={() => { setSearch(''); setConnectionGroup(null) }}>清除筛选</Button></div>}
     <div className="table-footer"><span>共 {shown.length} 个连接</span><span><ShieldCheck size={13} />连接信息仅保存在本地</span></div>
     <section className="import-banner"><div className="import-banner-icon"><FolderOpen size={22} /></div><div><h3>把熟悉的连接带过来</h3><p>导入 Shellink 连接 JSON，继续使用已有的主机配置。</p></div><Button variant="outline" onClick={() => openModal('import')}>导入配置<ArrowRight size={14} /></Button></section>
   </div>

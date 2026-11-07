@@ -4,18 +4,16 @@ import type { RuntimeInfo, MCPInfo } from './backend'
 
 export type Modal = 'connection' | 'session' | 'import' | 'commands' | null
 export type SettingsTab = 'general' | 'appearance' | 'advanced'
-export type ConnectionFilter = 'all' | 'SSH' | 'Local'
 export type AIClient = 'Claude Code' | 'Codex' | 'Cursor'
 export type DesignContext = {
   coreEpoch: number
   coreReady: boolean
   connections: Connection[]
-  connectionFilter: ConnectionFilter
-  setConnectionFilter: (filter: ConnectionFilter) => void
   connectionGroup: string | null
   setConnectionGroup: (group: string | null) => void
   connectionGroups: string[]
   addConnectionGroup: (name: string) => string | null
+  deleteConnectionGroup: (name: string) => void
   moveConnectionToGroup: (id: string, group: string) => void
   draggedConnectionId: string | null
   setDraggedConnectionId: (id: string | null) => void

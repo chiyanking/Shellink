@@ -16,7 +16,7 @@ import {
   PanelsTopLeft,
   X,
 } from 'lucide-react'
-import { Design, type AIClient, type ConnectionFilter, type Modal, type SettingsTab } from './context'
+import { Design, type AIClient, type Modal, type SettingsTab } from './context'
 import { connectionFrom, sessionFrom, emptyConnection, emptySession, type Connection, type Page, type Session } from './data'
 import { rpc, onCoreEvent, errorText, preference, savePreference, type Profile, type SessionRecord, type RuntimeInfo, type MCPInfo } from './backend'
 import { Button, Dialog, Hint, Input, Select, TooltipProvider } from './components/ui'
@@ -55,7 +55,6 @@ export default function App() {
   const [modal, setModal] = useState<Modal>(null)
   const [toast, setToast] = useState('')
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [connectionFilter, setConnectionFilter] = useState<ConnectionFilter>('all')
   const [connectionGroupFilter, setConnectionGroupFilter] = useState<string | null>(null)
   const [definedConnectionGroups, setDefinedConnectionGroups] = useState(() => preference<string[]>('connectionGroups', []))
   const [draggedConnectionId, setDraggedConnectionId] = useState<string | null>(null)
@@ -169,6 +168,14 @@ export default function App() {
     storeConnectionGroups([...connectionGroups, trimmed])
     return null
   }
+  function deleteConnectionGroup(name: string) {
+    storeConnectionGroups(connectionGroups.filter(group => group !== name))
+    for (const connection of connections.filter(item => !item.archived && item.group === name)) savePreference(`group.${connection.id}`, '')
+    setConnections(current => current.map(item => !item.archived && item.group === name ? { ...item, group: '' } : item))
+    if (connectionGroupFilter === name) setConnectionGroupFilter(null)
+    if (connectionGroup === name) setConnectionGroup('')
+    notify('分组已删除，连接保留在分组外')
+  }
   function moveConnectionToGroup(id: string, group: string) {
     const connection = connections.find(item => item.id === id && !item.archived)
     if (!connection || connection.group === group || (group && !connectionGroups.includes(group))) return
@@ -206,8 +213,8 @@ export default function App() {
     <Design.Provider
       value={{
         coreEpoch, coreReady, connections, runtime, mcp, refresh, editConnection, deleteConnection, font, fontSize, setFont, setFontSize,
-        connectionFilter, setConnectionFilter, connectionGroup: connectionGroupFilter, setConnectionGroup: setConnectionGroupFilter, settingsTab, setSettingsTab, client, setClient,
-        connectionGroups, addConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
+        connectionGroup: connectionGroupFilter, setConnectionGroup: setConnectionGroupFilter, settingsTab, setSettingsTab, client, setClient,
+        connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
         page,
         navigate,
         selected,
