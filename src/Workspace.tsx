@@ -148,7 +148,7 @@ function TerminalContent({ session }: { session: Session }) {
     })().catch(error => { if (alive) notify(String(error)) })
     return () => { alive = false; dispose?.(); resizeObserver.disconnect(); cancelAnimationFrame(resizeFrame); input.dispose(); terminal.dispose() }
   }, [session.id, font, fontSize, fontDescriptor, readyFont, coreEpoch, notify, colorScheme])
-  return <div className="terminal-output xterm-host" aria-label={`${session.name} 终端`}><div ref={host} className="terminal-viewport" /></div>
+  return <div className="terminal-output xterm-host" aria-label={`${session.name} 终端`}><div ref={host} className="terminal-viewport" style={{ '--terminal-scrollbar-width': `${TERMINAL_SCROLLBAR_WIDTH}px` } as React.CSSProperties} /></div>
 }
 
 function TerminalPanel({ session, secondary = false }: { session: Session; secondary?: boolean }) {

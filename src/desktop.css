@@ -1303,6 +1303,12 @@ select {
 }
 .terminal-viewport > .xterm {
   height: 100%;
+  width: max-content;
+  margin-left: auto;
+}
+/* Keep whole terminal columns flush with the scrollbar; leave rounding space on the left. */
+.terminal-viewport .xterm-screen {
+  margin-right: var(--terminal-scrollbar-width);
 }
 .terminal-viewport .xterm-viewport {
   background: var(--terminal-canvas);
