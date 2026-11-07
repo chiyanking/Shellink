@@ -113,7 +113,6 @@
 }
 
 /* Navigation remains available when the context panel is collapsed. */
-.desktop-shell { grid-template-rows: minmax(0, 1fr) 24px; }
 .desktop-body { position: relative; grid-template-columns: 56px var(--sidebar-width) minmax(0, 1fr); }
 .sidebar-hidden .desktop-body { grid-template-columns: 56px minmax(0, 1fr); }
 .sidebar-hidden .context-panel { display: none; }
@@ -216,7 +215,6 @@
 .topbar-preview.is-offline .status-dot, .topbar-preview.is-loading .status-dot { background: var(--amber); }
 .main-scroll { padding: 24px 28px 28px; }
 .main-scroll.workspace-scroll { padding: 0; }
-.app-statusbar { background: var(--chrome); padding: 0 14px; font: 9px var(--font-mono); }
 .ui-button { border-radius: 8px; font-size: 12px; height: 32px; }
 .ui-button-default { border-color: transparent; background: var(--primary); box-shadow: var(--accent-shadow); color: var(--primary-foreground); }
 .ui-button-default:hover { background: var(--primary-hover); }
@@ -328,12 +326,6 @@
 .terminal-session-meta > .ui-button { flex-shrink: 0; width: 24px; height: 24px; color: var(--muted-foreground); }
 .terminal-session-meta > .ui-button:hover { color: var(--foreground); background: var(--surface-hover); }
 .terminal-viewport { inset: 2px 0 2px 6px; }
-/* Let the status bar cover the unused fraction of a terminal row without moving the screen. */
-.terminal-bottom { position: relative; min-height: 30px; height: calc(30px + var(--terminal-row-remainder, 0px)); margin-top: calc(-1 * var(--terminal-row-remainder, 0px)); background: var(--terminal-header); color: var(--terminal-muted); border-top: 1px solid var(--terminal-border); padding: 0 12px; font: 9px var(--font-mono); }
-.terminal-history-link { display: flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--terminal-link); font-size: 9px; padding: 0; }
-.terminal-history-link:hover { color: var(--terminal-command); }
-.terminal-latency { color: var(--terminal-muted); }
-
 /* The welcome screen has useful actions even before the first connection. */
 .workspace-page.workspace-welcome { display: flex; flex-direction: column; padding: 27px 30px 20px; overflow-y: auto; background: var(--background); }
 .welcome-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -458,6 +450,4 @@
   .terminal-encoding { display: none !important; }
   .backend-banner { margin: 8px 8px 0; padding: 10px; flex-wrap: wrap; gap: 8px; }
   .backend-banner p { font-size: 9px; }
-  .app-statusbar > div:last-child > span:first-child, .app-statusbar > div:last-child > .status-separator { display: none; }
-  .app-statusbar { padding: 0 8px; font-size: 8px; }
 }

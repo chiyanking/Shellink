@@ -212,10 +212,6 @@ select {
   flex: 0 0 5px;
   background: var(--green);
 }
-.status-separator {
-  color: var(--border-strong);
-  margin: 0 3px;
-}
 .text-link {
   border: 0;
   background: transparent;
@@ -502,7 +498,7 @@ select {
   height: 100vh;
   height: 100dvh;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) 26px;
+  grid-template-rows: minmax(0, 1fr);
   background: var(--background);
   overflow: hidden;
 }
@@ -897,34 +893,6 @@ select {
   height: 100%;
   min-height: 0;
 }
-.app-statusbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  background: var(--sidebar);
-  border-top: 1px solid var(--border);
-  font-size: 9px;
-  color: var(--subtle-foreground);
-}
-.app-statusbar > div {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.app-statusbar .status-dot {
-  width: 4px;
-  height: 4px;
-  flex-basis: 4px;
-}
-.statusbar-brand {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  color: var(--primary-text);
-  margin-left: 2px;
-}
 .sidebar-hidden .desktop-body {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -974,7 +942,7 @@ select {
   min-width: 0;
   min-height: 0;
 }
-/* Terminal workspace is a full-bleed surface: tabs → toolbar → terminal → status. */
+/* Terminal workspace fills the available surface below the toolbar. */
 .workspace-page {
   height: 100%;
   min-height: 0;
@@ -1459,51 +1427,6 @@ select {
   height: 13px;
   background: var(--terminal-cursor);
   opacity: 0.8;
-}
-.terminal-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  height: 28px;
-  flex-shrink: 0;
-  padding: 0 12px;
-  background: var(--terminal-header);
-  border-top: 1px solid var(--border);
-  color: var(--terminal-muted);
-  font: 9px var(--font-mono);
-}
-.terminal-bottom-tabs {
-  display: flex;
-  align-self: stretch;
-  gap: 14px;
-}
-.terminal-bottom-tabs button {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  background: transparent;
-  padding: 0;
-  color: var(--muted-foreground);
-  font: 10px var(--font-sans);
-}
-.terminal-bottom-tabs button.is-active {
-  border-bottom-color: var(--primary-text);
-  color: var(--primary-text);
-}
-.terminal-latency {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 9px;
-  color: var(--green);
-}
-.terminal-latency > span {
-  width: 4px;
-  height: 4px;
-  flex-basis: 4px;
 }
 .terminal-files {
   padding: 18px;
@@ -2756,7 +2679,7 @@ select {
 }
 .app-toast {
   position: fixed;
-  bottom: 42px;
+  bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 110;
@@ -2999,9 +2922,6 @@ select {
   .import-banner .ui-button {
     margin-left: 54px;
   }
-  .app-statusbar .statusbar-center {
-    display: none;
-  }
 }
 @media (max-width: 580px) {
   .desktop-body {
@@ -3015,7 +2935,7 @@ select {
     position: absolute;
     z-index: 40;
     top: 0;
-    bottom: 25px;
+    bottom: 0;
     left: 0;
     width: 225px;
     box-shadow: 20px 0 80px var(--overlay);
@@ -3108,9 +3028,6 @@ select {
     max-width: none;
     order: 1;
   }
-  .terminal-bottom > span:nth-child(2) {
-    display: none;
-  }
   .toolbar-right {
     width: 100%;
   }
@@ -3175,16 +3092,6 @@ select {
   }
   .command-dialog-results > button > small {
     font-size: 9px;
-  }
-  .app-statusbar {
-    padding: 0 9px;
-    font-size: 8px;
-  }
-  .app-statusbar > div {
-    gap: 5px;
-  }
-  .app-statusbar > div:first-child > span:nth-last-child(-n + 2) {
-    display: none;
   }
   .app-toast {
     font-size: 10px;

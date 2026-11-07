@@ -333,13 +333,3 @@
 .connection-session-count:disabled {
   opacity: 1;
 }
-.statusbar-session-link {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  font-size: inherit;
-  color: inherit;
-}
-.statusbar-session-link:hover {
-  color: var(--primary-text);
-}

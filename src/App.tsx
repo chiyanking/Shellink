@@ -3,7 +3,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   Check,
-  Keyboard,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -296,28 +295,6 @@ export default function App() {
               </div>
             </main>
           </div>
-          <footer className="app-statusbar">
-            <div>
-              <span className={cn("status-dot", !coreReady && "is-offline")} />
-              <span>本地工作区</span>
-              <span className="status-separator">|</span>
-              <button className="statusbar-session-link" onClick={() => navigate('workspace')}>
-                {activeSessionCount} 个活跃会话
-              </button>
-            </div>
-            <div className="statusbar-center">
-              <Keyboard size={11} />
-              <span>⇧ Esc 接管终端</span>
-            </div>
-            <div>
-              <span>{runtime ? `PID ${runtime.status.pid}` : '未连接'}</span>
-              <span className="status-separator">|</span>
-              <span>Shellink {runtime?.status.version ?? '0.2.4'}</span>
-              <span className="statusbar-brand">
-                <Terminal size={11} />
-              </span>
-            </div>
-          </footer>
         </div>
         <SshAuth enabled={coreReady} sessions={sessions} onChange={refresh} />
         <Dialog
