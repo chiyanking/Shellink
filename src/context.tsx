@@ -13,7 +13,7 @@ export type DesignContext = {
   setConnectionGroup: (group: string | null) => void
   connectionGroups: string[]
   addConnectionGroup: (name: string) => string | null
-  deleteConnectionGroup: (name: string) => void
+  deleteConnectionGroup: (name: string) => boolean
   moveConnectionToGroup: (id: string, group: string) => void
   draggedConnectionId: string | null
   setDraggedConnectionId: (id: string | null) => void

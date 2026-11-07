@@ -1,7 +1,7 @@
 import { useState, type DragEvent } from 'react'
 import {
   ArrowUpRight, Bot, ChevronDown, Code2, Copy, FileClock, Globe, Keyboard,
-  FolderPlus, LayoutGrid, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
+  FolderPlus, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
   Terminal, Trash2, Workflow,
 } from 'lucide-react'
 import { useDesign, type SettingsTab } from './context'
@@ -119,7 +119,6 @@ export function ContextPanel() {
         {page === 'workspace' && <div className="context-group"><div className="context-label">快速连接 <span>{profiles.length}</span></div>{profiles.slice(0, 5).map(connection => <button className="context-item" key={connection.id} onClick={() => openConnection(connection.id)}><Server size={13} /><span className="context-item-text"><strong>{connection.name}</strong></span><ArrowUpRight size={12} /></button>)}{!profiles.length && <button className="context-text-button" onClick={() => openModal('connection')}><Plus size={12} />添加你的第一个连接</button>}</div>}
       </>}
       {page === 'connections' && <>
-        <button className={cn('context-item', connectionGroup === null && 'is-active')} onClick={() => setConnectionGroup(null)}><LayoutGrid size={14} /><span className="context-item-text">全部连接</span><span className="context-count">{profiles.length}</span></button>
         <section className={cn('context-group context-ungrouped', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === '' && 'is-drop-target')} aria-label="分组外的连接" {...dropProps('')}>
           {connectionList('')}
           {draggedConnectionId && <p className="context-drop-hint">拖到这里移出分组</p>}
@@ -128,10 +127,8 @@ export function ContextPanel() {
           <div className={cn('context-group-heading', connectionGroup === group && 'is-active')}>
             <button className="context-group-toggle" onClick={() => setCollapsed(current => current.includes(group) ? current.filter(value => value !== group) : [...current, group])} aria-label={`${collapsed.includes(group) ? '展开' : '收起'}分组 ${group}`} aria-expanded={!collapsed.includes(group)}><ChevronDown size={12} className={collapsed.includes(group) ? 'is-collapsed' : ''} /></button>
             <button className="context-group-select" aria-pressed={connectionGroup === group} onClick={() => { setConnectionGroup(group); setCollapsed(current => current.filter(value => value !== group)) }}><strong title={group}>{group}</strong><span>{profiles.filter(connection => connection.group === group).length}</span></button>
-            <Hint label="删除分组"><button className="context-group-delete" aria-label={`删除分组 ${group}`} onClick={() => {
-              const count = profiles.filter(connection => connection.group === group).length
-              if (!count || window.confirm(`删除分组“${group}”？其中 ${count} 个连接会移到分组外，连接配置会保留。`)) {
-                deleteConnectionGroup(group)
+            <Hint label={profiles.some(connection => connection.group === group) ? '请先移出分组内的连接，再删除分组' : '删除分组'}><button className="context-group-delete" aria-label={`删除分组 ${group}`} onClick={() => {
+              if (deleteConnectionGroup(group)) {
                 setCollapsed(current => current.filter(value => value !== group))
               }
             }}><Trash2 size={12} /></button></Hint>

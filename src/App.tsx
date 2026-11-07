@@ -169,12 +169,15 @@ export default function App() {
     return null
   }
   function deleteConnectionGroup(name: string) {
+    if (connections.some(item => !item.archived && item.group === name)) {
+      notify('分组内还有连接，请先移出连接后再删除')
+      return false
+    }
     storeConnectionGroups(connectionGroups.filter(group => group !== name))
-    for (const connection of connections.filter(item => !item.archived && item.group === name)) savePreference(`group.${connection.id}`, '')
-    setConnections(current => current.map(item => !item.archived && item.group === name ? { ...item, group: '' } : item))
     if (connectionGroupFilter === name) setConnectionGroupFilter(null)
     if (connectionGroup === name) setConnectionGroup('')
-    notify('分组已删除，连接保留在分组外')
+    notify('分组已删除')
+    return true
   }
   function moveConnectionToGroup(id: string, group: string) {
     const connection = connections.find(item => item.id === id && !item.archived)
