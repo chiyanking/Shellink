@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 import type { Connection, Page, Session } from './data'
 import type { RuntimeInfo, MCPInfo } from './backend'
 
-export type Modal = 'connection' | 'session' | 'import' | 'commands' | null
+export type Modal = 'connection' | 'session' | 'import' | 'commands' | 'delete-sessions' | null
 export type SettingsTab = 'general' | 'appearance' | 'advanced'
 export type AIClient = 'Claude Code' | 'Codex' | 'Cursor'
 export type DesignContext = {
@@ -36,6 +36,9 @@ export type DesignContext = {
   sessions: Session[]
   selectedSession: Session
   openSession: (id: string) => void
+  deleteSession: (id: string) => void
+  deleteSessions: (ids: string[]) => void
+  deletingSessions: boolean
   inspectSession: (id: string) => void
   historyScope: { sessionId?: string; eventId?: string }
   inspectHistory: (sessionId: string, eventId?: string) => void

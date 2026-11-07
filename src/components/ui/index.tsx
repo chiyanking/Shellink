@@ -1,6 +1,7 @@
 import * as React from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import * as DropdownPrimitive from '@radix-ui/react-dropdown-menu'
+import * as ContextMenuPrimitive from '@radix-ui/react-context-menu'
 import * as SwitchPrimitive from '@radix-ui/react-switch'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import { Slot } from '@radix-ui/react-slot'
@@ -113,19 +114,22 @@ export function Dialog({
   )
 }
 
+type MenuItem = {
+  label: string
+  onSelect?: () => void
+  icon?: React.ReactNode
+  checked?: boolean
+  danger?: boolean
+  disabled?: boolean
+}
+
 export function Menu({
   trigger,
   items,
   align = 'end',
 }: {
   trigger: React.ReactNode
-  items: {
-    label: string
-    onSelect?: () => void
-    icon?: React.ReactNode
-    checked?: boolean
-    danger?: boolean
-  }[]
+  items: MenuItem[]
   align?: 'start' | 'center' | 'end'
 }) {
   return (
@@ -138,6 +142,7 @@ export function Menu({
               key={`${item.label}-${index}`}
               className={cn('ui-menu-item', item.danger && 'ui-menu-danger')}
               onSelect={item.onSelect}
+              disabled={item.disabled}
             >
               {item.icon}
               <span>{item.label}</span>
@@ -148,6 +153,22 @@ export function Menu({
       </DropdownPrimitive.Portal>
     </DropdownPrimitive.Root>
   )
+}
+
+export function ContextMenu({ children, items }: { children: React.ReactElement; items: MenuItem[] }) {
+  return <ContextMenuPrimitive.Root>
+    <ContextMenuPrimitive.Trigger asChild>{children}</ContextMenuPrimitive.Trigger>
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Content className="ui-menu">
+        {items.map((item, index) => <ContextMenuPrimitive.Item
+          key={`${item.label}-${index}`}
+          className={cn('ui-menu-item', item.danger && 'ui-menu-danger')}
+          onSelect={item.onSelect}
+          disabled={item.disabled}
+        >{item.icon}<span>{item.label}</span></ContextMenuPrimitive.Item>)}
+      </ContextMenuPrimitive.Content>
+    </ContextMenuPrimitive.Portal>
+  </ContextMenuPrimitive.Root>
 }
 
 export function Select({

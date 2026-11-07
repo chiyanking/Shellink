@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from 'react'
+import { useEffect, useState, type DragEvent } from 'react'
 import {
   ArrowUpRight, Bot, ChevronDown, Code2, Copy, FileClock, Globe, Keyboard,
   FolderPlus, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { useDesign, type SettingsTab } from './context'
 import { shortTime } from './data'
-import { Badge, Hint, Input } from './components/ui'
+import { Badge, ContextMenu, Hint, Input } from './components/ui'
 import { cn } from './lib/utils'
 import { connectionDragProps } from './connection-drag'
 
@@ -41,7 +41,7 @@ export function NavigationRail() {
 
 export function ContextPanel() {
   const {
-    page, sessions, selectedSession, openSession, openModal, connections, openConnection, editConnection,
+    page, sessions, selectedSession, openSession, deleteSession, deleteSessions, deletingSessions, openModal, connections, openConnection, editConnection,
     connectionGroup, setConnectionGroup,
     connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
     mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime, notify,
@@ -52,10 +52,20 @@ export function ContextPanel() {
   const [newGroupName, setNewGroupName] = useState('')
   const [creatingGroup, setCreatingGroup] = useState(false)
   const [groupError, setGroupError] = useState('')
+  const [selectingSessions, setSelectingSessions] = useState(false)
+  const [selectedDeleteSessionIds, setSelectedDeleteSessionIds] = useState<string[]>([])
   const active = sessions.filter(session => session.status !== 'ended')
   const ended = sessions.filter(session => session.status === 'ended')
   const profiles = connections.filter(connection => !connection.archived)
   const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase())
+  const visibleEnded = ended.filter(session => matches(`${session.name} ${session.id}`))
+  const selectedEnded = ended.filter(session => selectedDeleteSessionIds.includes(session.id))
+  const allVisibleSelected = visibleEnded.length > 0 && visibleEnded.every(session => selectedDeleteSessionIds.includes(session.id))
+  useEffect(() => { setSelectingSessions(false); setSelectedDeleteSessionIds([]) }, [page])
+  useEffect(() => { if (!ended.length) { setSelectingSessions(false); setSelectedDeleteSessionIds([]) } }, [ended.length])
+  function toggleSessionSelection(id: string) {
+    setSelectedDeleteSessionIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
+  }
   function dropProps(group: string) {
     return {
       onDragOver: (event: DragEvent<HTMLElement>) => {
@@ -85,26 +95,32 @@ export function ContextPanel() {
   }
   function sessionList(items: typeof sessions) {
     return items.filter(session => matches(`${session.name} ${session.id}`)).map(session => {
-      const selected = page === 'history' ? historyScope.sessionId === session.id : selectedSession.id === session.id
-      return <div key={session.id} className={cn('context-item context-session', selected && 'is-active')}>
+      const selecting = selectingSessions && session.status === 'ended'
+      const selected = selecting ? selectedDeleteSessionIds.includes(session.id) : page === 'history' ? historyScope.sessionId === session.id : selectedSession.id === session.id
+      const row = <div key={session.id} className={cn('context-item context-session', selected && 'is-active', selecting && 'is-selecting')}>
+        {selecting && <input className="context-session-checkbox" type="checkbox" aria-label={`选择已结束会话 ${session.name}`} checked={selected} disabled={deletingSessions} onChange={() => toggleSessionSelection(session.id)} />}
         <button
           className="context-session-select"
           aria-pressed={selected}
-          onClick={() => page === 'history' ? inspectHistory(session.id) : openSession(session.id)}
-          title={`${session.name} · ${session.id}`}
+          disabled={selecting && deletingSessions}
+          onClick={() => selecting ? toggleSessionSelection(session.id) : page === 'history' ? inspectHistory(session.id) : openSession(session.id)}
+          title={`${session.name} · ${session.id}${selecting ? ' · 点击选择' : session.status === 'ended' ? ' · 右键删除' : ''}`}
         >
-          <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />
+          {!selecting && <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />}
           <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created}</small></span>
           {session.status !== 'ended' && session.mode === 'AUTO' && <Bot size={12} className="context-bot" />}
         </button>
-        <Hint label={`复制会话 ID · ${session.id}`}>
+        {session.status !== 'ended' && <Hint label={`复制会话 ID · ${session.id}`}>
           <button
             className="context-session-copy"
             aria-label={`复制 ${session.name} 的会话 ID`}
             onClick={() => void navigator.clipboard.writeText(session.id).then(() => notify('已复制会话 ID')).catch(() => notify('复制失败，请重试'))}
           ><Copy size={12} /></button>
-        </Hint>
+        </Hint>}
       </div>
+      return session.status === 'ended' && !selecting ? <ContextMenu key={session.id} items={[
+        { label: '删除会话', icon: <Trash2 size={14} />, danger: true, disabled: deletingSessions, onSelect: () => deleteSession(session.id) },
+      ]}>{row}</ContextMenu> : row
     })
   }
   return <aside className="context-panel" aria-label={`${page === 'workspace' ? '会话' : page === 'connections' ? '连接' : page === 'integrations' ? 'AI 接入' : page === 'history' ? '历史' : '设置'}侧面板`}>
@@ -114,7 +130,18 @@ export function ContextPanel() {
       {(page === 'workspace' || page === 'history') && <>
         <label className="context-search"><Search size={13} /><input aria-label="搜索会话" placeholder="搜索会话…" value={search} onChange={event => setSearch(event.target.value)} /><kbd>⌕</kbd></label>
         <section className="context-group"><div className="context-label">运行中 <span>{active.length}</span></div>{sessionList(active)}{!active.length && <p className="context-empty">暂无运行中的会话</p>}</section>
-        <section className="context-group"><div className="context-label">已结束 <span>{ended.length}</span></div>{sessionList(ended)}{!ended.length && <p className="context-empty">结束的会话会保留在这里</p>}</section>
+        <section className="context-group">
+          <div className="context-label context-ended-label">已结束 <span>{ended.length}</span>{ended.length > 0 && <button className="context-bulk-delete" disabled={deletingSessions} onClick={() => { setSelectingSessions(!selectingSessions); setSelectedDeleteSessionIds([]) }}>{selectingSessions ? '取消' : '批量删除'}</button>}</div>
+          {selectingSessions && ended.length > 0 && <div className="context-batch-toolbar">
+            <label className="context-select-all"><input type="checkbox" aria-label={search ? '全选当前结果' : '全选已结束会话'} checked={allVisibleSelected} disabled={deletingSessions || !visibleEnded.length} ref={input => { if (input) input.indeterminate = !allVisibleSelected && visibleEnded.some(session => selectedDeleteSessionIds.includes(session.id)) }} onChange={event => {
+              const checked = event.target.checked
+              const ids = visibleEnded.map(session => session.id)
+              setSelectedDeleteSessionIds(current => checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id)))
+            }} />{search ? '全选当前结果' : '全选'}</label>
+            <button className="context-delete-selected" disabled={deletingSessions || !selectedEnded.length} onClick={() => deleteSessions(selectedEnded.map(session => session.id))}>{deletingSessions ? '删除中…' : `删除所选 (${selectedEnded.length})`}</button>
+          </div>}
+          {sessionList(ended)}{!ended.length && <p className="context-empty">结束的会话会保留在这里</p>}
+        </section>
         {!!search && !sessions.some(session => matches(`${session.name} ${session.id}`)) && <p className="context-empty">没有匹配的会话</p>}
         {page === 'workspace' && <div className="context-group"><div className="context-label">快速连接 <span>{profiles.length}</span></div>{profiles.slice(0, 5).map(connection => <button className="context-item" key={connection.id} onClick={() => openConnection(connection.id)}><Server size={13} /><span className="context-item-text"><strong>{connection.name}</strong></span><ArrowUpRight size={12} /></button>)}{!profiles.length && <button className="context-text-button" onClick={() => openModal('connection')}><Plus size={12} />添加你的第一个连接</button>}</div>}
       </>}

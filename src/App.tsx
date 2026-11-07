@@ -67,12 +67,17 @@ export default function App() {
   const [connectionGroup, setConnectionGroup] = useState('')
   const [editingId, setEditingId] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deletingSessions, setDeletingSessions] = useState(false)
+  const deletingSessionsRef = useRef(false)
+  const [pendingSessionDeleteIds, setPendingSessionDeleteIds] = useState<string[]>([])
+  const [sessionDeleteError, setSessionDeleteError] = useState('')
   const [importText, setImportText] = useState('')
   const selectedSession = sessions.find(item => item.id === selectedSessionId) ?? emptySession
   const selected = connections.find(item => item.id === selectedSession.connectionId) ?? emptyConnection
   const manual = selectedSession.mode === 'MANUAL'
   const activeSessionCount = sessions.filter(item => item.status !== 'ended').length
   const connectionGroups = [...new Set([...definedConnectionGroups, ...connections.filter(item => !item.archived).map(item => item.group)])].filter(Boolean)
+  const pendingSessionDeletes = sessions.filter(session => session.status === 'ended' && pendingSessionDeleteIds.includes(session.id))
   const refreshBusy = useRef(false)
   const notify = useCallback((text: string) => {
     setToast(text)
@@ -142,6 +147,53 @@ export default function App() {
     if (existing) openSession(existing.id); else void createSession(id)
   }
   function inspectSession(id: string) { openSession(id) }
+  function deleteSessions(ids: string[]) {
+    if (deletingSessionsRef.current) return
+    const targets = sessions.filter(session => session.status === 'ended' && ids.includes(session.id))
+    if (!targets.length) { notify('请选择已结束的会话'); return }
+    setPendingSessionDeleteIds(targets.map(session => session.id))
+    setSessionDeleteError('')
+    setModal('delete-sessions')
+  }
+  function deleteSession(id: string) { deleteSessions([id]) }
+  function cancelSessionDeletion() {
+    if (deletingSessionsRef.current) return
+    setModal(null)
+    setPendingSessionDeleteIds([])
+    setSessionDeleteError('')
+  }
+  async function confirmSessionDeletion() {
+    const targets = pendingSessionDeletes
+    if (deletingSessionsRef.current || !targets.length) return
+    deletingSessionsRef.current = true
+    setDeletingSessions(true)
+    setSessionDeleteError('')
+    const deleted = new Set<string>()
+    let failure = ''
+    try {
+      for (const session of targets) {
+        try { await rpc('sessions.removeRecord', { id: session.id }); deleted.add(session.id) }
+        catch (error) { failure ||= errorText(error) }
+      }
+      if (deleted.size) {
+        setSessions(current => current.filter(item => !deleted.has(item.id)))
+        setSelectedSessionId(current => deleted.has(current) ? '' : current)
+        setHistoryScope(current => current.sessionId && deleted.has(current.sessionId) ? {} : current)
+      }
+      await refresh()
+      if (deleted.size === targets.length) {
+        setModal(null)
+        setPendingSessionDeleteIds([])
+        notify(`已删除 ${deleted.size} 个会话及其终端历史`)
+      } else {
+        setPendingSessionDeleteIds(targets.filter(session => !deleted.has(session.id)).map(session => session.id))
+        setSessionDeleteError(`已删除 ${deleted.size} 个会话，${targets.length - deleted.size} 个删除失败：${failure}`)
+      }
+    } finally {
+      deletingSessionsRef.current = false
+      setDeletingSessions(false)
+    }
+  }
   function inspectHistory(sessionId: string, eventId?: string) { navigate('history'); setHistoryScope({ sessionId, eventId }) }
   async function setSessionManual(id: string, value: boolean) {
     try { await rpc('sessions.mode', { id, mode: value ? 'MANUAL' : 'AUTO' }); await refresh() } catch (error) { notify(errorText(error)) }
@@ -223,6 +275,9 @@ export default function App() {
         sessions,
         selectedSession,
         openSession,
+        deleteSession,
+        deleteSessions,
+        deletingSessions,
         inspectSession,
         historyScope,
         inspectHistory,
@@ -297,6 +352,14 @@ export default function App() {
           </div>
         </div>
         <SshAuth enabled={coreReady} sessions={sessions} onChange={refresh} />
+        <Dialog open={modal === 'delete-sessions'} onOpenChange={open => { if (!open) cancelSessionDeletion() }} title="删除会话" description={`确定删除所选 ${pendingSessionDeletes.length} 个已结束的会话？会话记录及终端历史将一并删除。`}>
+          <ul className="session-delete-list">{pendingSessionDeletes.map(session => <li key={session.id}>{session.name}</li>)}</ul>
+          {sessionDeleteError && <p className="session-delete-error" role="alert">{sessionDeleteError}</p>}
+          <div className="dialog-footer">
+            <Button variant="outline" disabled={deletingSessions} onClick={cancelSessionDeletion}>取消</Button>
+            <Button variant="danger" disabled={deletingSessions || !pendingSessionDeletes.length} onClick={() => void confirmSessionDeletion()}>{deletingSessions ? '删除中…' : `删除 ${pendingSessionDeletes.length} 个会话`}</Button>
+          </div>
+        </Dialog>
         <Dialog
           open={modal === 'connection'}
           onOpenChange={(open) => !open && setModal(null)}
