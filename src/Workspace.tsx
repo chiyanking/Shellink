@@ -163,6 +163,8 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
   } = useDesign()
   const connection = connections.find((item) => item.id === session.connectionId) ?? emptyConnection
   const manual = session.mode === 'MANUAL'
+  const address = `${connection.user ? `${connection.user}@` : ''}${connection.host}${connection.type === 'SSH' ? `:${connection.port}` : ''}`
+  const controlNotice = manual ? '你正在控制终端 · AI 写入已暂停' : '允许 MCP 写入 · 你可以随时接管'
   const setManual = (value: boolean) => setSessionManual(session.id, value)
   return (
     <section
@@ -170,42 +172,46 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
       aria-label={secondary ? '第二终端面板' : '终端面板'}
     >
       <div className="terminal-address">
-        <div className="terminal-connection">
+        <div className="terminal-connection" title={address}>
           <ShieldCheck size={13} />
           <span>
             {connection.user ? `${connection.user}@` : ''}{connection.host}
+            {connection.type === 'SSH' && <span className="terminal-port">:{connection.port}</span>}
           </span>
-          {connection.type === 'SSH' && <span className="terminal-port">:{connection.port}</span>}
           <Badge>{connection.type === 'Local' ? 'LOCAL' : 'SSH'}</Badge>
         </div>
         <div className="terminal-session-meta">
-          <div className={cn('terminal-header-notice', manual && 'is-manual')}>
-            {session.status === 'ended' ? <div><History size={13} /><span>会话已结束 · {session.result} · 终端输出已保留</span></div> : <>
-              <div>
-                {manual ? <Keyboard size={13} /> : <Radio size={13} />}
-                <span>{manual ? '你正在控制终端 · AI 写入已暂停' : '允许 MCP 写入 · 你可以随时接管'}</span>
-              </div>
-            </>}
+          <div
+            className={cn('terminal-header-notice', manual && 'is-manual')}
+            title={session.status === 'ended' ? `会话已结束 · ${session.result} · 终端输出已保留` : controlNotice}
+          >
+            <div>
+              {session.status === 'ended' ? <History size={13} /> : manual ? <Keyboard size={13} /> : <Radio size={13} />}
+              <span>{session.status === 'ended' ? `已结束 · ${session.result}` : manual ? 'AI 写入已暂停' : 'MCP 可写入'}</span>
+            </div>
           </div>
           <div className="terminal-control" role="group" aria-label="控制权模式">
-            <span className="terminal-meta-label">控制权</span>
             <button
               className={cn('terminal-control-option', !manual && 'is-active')}
               aria-pressed={!manual}
+              aria-label="AI 自动控制"
+              title="允许 MCP 写入 · 你可以随时接管"
               disabled={session.status === 'ended'}
               onClick={() => setManual(false)}
             >
               <Bot size={12} />
-              AI 自动
+              AI
             </button>
             <button
-              className={cn('terminal-control-option is-manual', manual && 'is-active')}
+              className={cn('terminal-control-option', manual && 'is-active')}
               aria-pressed={manual}
+              aria-label="手动控制"
+              title="你正在控制终端 · AI 写入已暂停"
               disabled={session.status === 'ended'}
               onClick={() => setManual(true)}
             >
               <Hand size={12} />
-              手动控制
+              手动
             </button>
           </div>
           <span className={cn('terminal-ready', session.status === 'ended' && 'is-ended', session.status === 'attention' && 'is-attention')}>

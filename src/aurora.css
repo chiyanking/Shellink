@@ -314,32 +314,39 @@
 
 /* One compact toolbar above a full-width terminal that follows the theme. */
 .workspace-terminal-page .terminal-panes { gap: 0; background: var(--background); }
-.terminal-panel { background: transparent; }
+.terminal-panel { background: transparent; container: terminal-panel / inline-size; }
 .terminal-panel-secondary { border-left: 1px solid var(--border); }
-.terminal-address { height: auto; min-height: 52px; flex-wrap: wrap; padding: 10px 14px; gap: 8px; background: var(--chrome); border-bottom: 1px solid var(--border); overflow: visible; }
-.terminal-connection { height: 30px; max-width: 265px; background: var(--surface); border-color: var(--border-strong); border-radius: 8px; font-size: 11px; }
+.terminal-address { height: 32px; min-height: 32px; flex-wrap: nowrap; padding: 0 8px; gap: 8px; background: var(--chrome); border-bottom: 1px solid var(--border); overflow: hidden; }
+.terminal-connection { height: 24px; max-width: min(42%, 380px); padding: 0; gap: 6px; background: transparent; border: 0; border-radius: 0; font-size: 11px; }
 .terminal-connection > svg { color: var(--green); }
-.terminal-connection .terminal-port { margin-left: -5px; }
-.terminal-session-meta { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; margin-left: 0; }
-.terminal-control { order: -1; display: inline-flex; align-items: center; gap: 2px; padding: 2px; height: 30px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); flex-shrink: 0; }
-.terminal-control > .terminal-meta-label { display: none; }
-.terminal-control-option { height: 24px; border-radius: 6px; padding: 0 9px; font-size: 10px; }
-.terminal-control-option.is-active { color: var(--primary-foreground); background: var(--primary); }
+.terminal-connection .terminal-port { margin-left: 0; }
+.terminal-connection .ui-badge { flex-shrink: 0; margin-left: 0; padding: 0; background: transparent; border: 0; }
+.terminal-session-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; min-width: 0; width: auto; margin-left: auto; }
+.terminal-control { order: -1; display: inline-flex; align-items: center; gap: 2px; padding: 0; height: 24px; border: 0; border-radius: 0; background: transparent; flex-shrink: 0; }
+.terminal-control-option { justify-content: center; width: 48px; height: 20px; border-radius: 3px; padding: 0 5px; font-size: 10px; }
+.terminal-control-option.is-active, .terminal-control-option.is-active:hover:not(:disabled) { color: var(--primary-text); background: var(--primary-soft); box-shadow: none; }
 .terminal-control-option.is-active svg { color: inherit; }
-.terminal-control-option.is-manual.is-active { color: var(--amber); background: var(--amber-soft); }
-.terminal-header-notice { flex: 1; min-width: 0; max-width: none; order: 0; font-size: 10px; }
+.terminal-header-notice { flex: 1; min-width: 0; max-width: none; order: 0; font-size: 10px; overflow: hidden; }
 .terminal-header-notice > div > svg { color: var(--primary-text); }
 .terminal-header-notice > div > span { color: var(--muted-foreground); }
-.terminal-panes.is-split .terminal-header-notice { display: none; }
-.terminal-ready { margin-left: auto; padding: 4px 7px; border-radius: 6px; background: var(--green-soft); color: var(--green); font-size: 9px; white-space: nowrap; }
-.terminal-ready.is-ended { background: var(--muted); color: var(--muted-foreground); }
-.terminal-ready.is-attention { background: var(--amber-soft); color: var(--amber); }
+.terminal-ready { margin-left: auto; padding: 0; border-radius: 0; background: transparent; color: var(--green); font-size: 9px; white-space: nowrap; }
+.terminal-ready.is-ended { background: transparent; color: var(--muted-foreground); }
+.terminal-ready.is-attention { background: transparent; color: var(--amber); }
 .terminal-ready.is-attention .status-dot { background: var(--amber); }
 .terminal-frame { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; overflow: hidden; background: var(--terminal-canvas); }
 .terminal-encoding { flex-shrink: 0; color: var(--subtle-foreground); font: 9px var(--font-mono); }
 .terminal-session-meta > .ui-button { flex-shrink: 0; width: 24px; height: 24px; color: var(--muted-foreground); }
 .terminal-session-meta > .ui-button:hover { color: var(--foreground); background: var(--surface-hover); }
 .terminal-viewport { inset: 2px 0 2px 6px; }
+@container terminal-panel (max-width: 760px) {
+  .terminal-header-notice { display: none; }
+}
+@container terminal-panel (max-width: 540px) {
+  .terminal-ready, .terminal-encoding { display: none; }
+}
+@container terminal-panel (max-width: 380px) {
+  .terminal-connection .ui-badge { display: none; }
+}
 /* The welcome screen has useful actions even before the first connection. */
 .workspace-page.workspace-welcome { display: flex; flex-direction: column; padding: 27px 30px 20px; overflow-y: auto; background: var(--background); }
 .welcome-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -396,7 +403,6 @@
 @media (max-width: 1250px) {
   :root, .dark { --sidebar-width: 240px; }
   .connection-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .terminal-header-notice { display: none; }
   .integration-layout { grid-template-columns: minmax(0, 1fr); }
   .integration-aside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
   .http-panel { margin-top: 0; }
@@ -406,9 +412,6 @@
   .main-scroll { padding: 23px 20px; }
   .main-scroll.workspace-scroll { padding: 0; }
   .main-topbar > .command-search { width: 220px; }
-  .terminal-session-meta { flex: 1 1 100%; }
-  .terminal-panes.is-split .terminal-connection { max-width: 100%; }
-  .terminal-panes.is-split .terminal-ready { display: none; }
   .welcome-quick-grid { gap: 8px; }
   .welcome-quick-grid > button { padding: 16px 12px; }
 }
@@ -457,11 +460,6 @@
   .connection-stat strong { font-size: 22px; }
   .settings-mobile-nav { display: flex; }
   .settings-layout, .integration-setup { padding: 18px; }
-  .terminal-address { padding: 8px 10px; }
-  .terminal-session-meta { width: auto; }
-  .terminal-control-option { padding: 0 7px; font-size: 9px; }
-  .terminal-ready { display: none; }
-  .terminal-encoding { display: none !important; }
   .backend-banner { margin: 8px 8px 0; padding: 10px; flex-wrap: wrap; gap: 8px; }
   .backend-banner p { font-size: 9px; }
 }
