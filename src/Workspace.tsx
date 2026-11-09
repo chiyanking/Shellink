@@ -12,6 +12,7 @@ import {
   Keyboard,
   PanelsTopLeft,
   Plus,
+  Power,
   Radio,
   Server,
   Workflow,
@@ -22,7 +23,7 @@ import {
 import { useDesign } from './context'
 import { createCommandHighlighter, terminalTheme } from './terminal-appearance'
 import { emptyConnection, sessionStatus, type Session } from './data'
-import { onCoreEvent, rpc } from './backend'
+import { errorText, onCoreEvent, rpc } from './backend'
 import { Badge, Button, Menu } from './components/ui'
 import { cn } from './lib/utils'
 import { createTerminalInput } from './terminal-input'
@@ -160,12 +161,24 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
     split,
     setSplit,
     notify,
+    refresh,
   } = useDesign()
+  const [closing, setClosing] = useState(false)
   const connection = connections.find((item) => item.id === session.connectionId) ?? emptyConnection
   const manual = session.mode === 'MANUAL'
   const address = `${connection.user ? `${connection.user}@` : ''}${connection.host}${connection.type === 'SSH' ? `:${connection.port}` : ''}`
   const controlNotice = manual ? '你正在控制终端 · AI 写入已暂停' : '允许 MCP 写入 · 你可以随时接管'
   const setManual = (value: boolean) => setSessionManual(session.id, value)
+  async function closeSession() {
+    if (closing || session.status === 'ended') return
+    setClosing(true)
+    try {
+      await rpc('sessions.close', { id: session.id })
+      await refresh()
+      notify('会话已关闭，终端历史已保留')
+    } catch (error) { notify(errorText(error)) }
+    finally { setClosing(false) }
+  }
   return (
     <section
       className={cn('terminal-panel', secondary && 'terminal-panel-secondary')}
@@ -196,7 +209,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
               aria-pressed={!manual}
               aria-label="AI 自动控制"
               title="允许 MCP 写入 · 你可以随时接管"
-              disabled={session.status === 'ended'}
+              disabled={closing || session.status === 'ended'}
               onClick={() => setManual(false)}
             >
               <Bot size={12} />
@@ -207,7 +220,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
               aria-pressed={manual}
               aria-label="手动控制"
               title="你正在控制终端 · AI 写入已暂停"
-              disabled={session.status === 'ended'}
+              disabled={closing || session.status === 'ended'}
               onClick={() => setManual(true)}
             >
               <Hand size={12} />
@@ -235,6 +248,13 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
                 label: '查看终端历史',
                 icon: <History size={14} />,
                 onSelect: () => inspectHistory(session.id),
+              },
+              {
+                label: closing ? '正在关闭…' : '关闭会话',
+                icon: <Power size={14} />,
+                danger: true,
+                disabled: closing || session.status === 'ended',
+                onSelect: () => void closeSession(),
               },
             ]}
           />
