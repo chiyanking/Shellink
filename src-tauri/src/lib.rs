@@ -41,7 +41,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("无法启动 Shellink")
+        .expect("无法启动 shellink")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 app.state::<mcp::Server>().stop();

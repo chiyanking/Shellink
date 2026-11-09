@@ -26,17 +26,17 @@ const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MCP_TOOLS: &[(&str, &str, &str)] = &[
     (
         "list_profiles",
-        "List all configured Shellink connection profiles (SSH or command).",
+        "List all configured shellink connection profiles (SSH or command).",
         r#"{"type":"object","properties":{}}"#,
     ),
     (
         "create_profile",
-        "Create a Shellink connection profile. SSH profiles use host, port, username and authentication fields.",
-        r#"{"type":"object","properties":{"name":{"type":"string","description":"Profile display name"},"connectType":{"type":"string","enum":["ssh","command"]},"host":{"type":"string"},"port":{"type":"integer","minimum":1,"maximum":65535},"username":{"type":"string"},"authType":{"type":"string","enum":["password","password-mfa","key","keyboard-interactive"]},"password":{"type":"string","description":"Plaintext password (encrypted by Shellink)"},"privateKey":{"type":"string","description":"Private key (encrypted by Shellink)"},"passphrase":{"type":"string"},"command":{"type":"string","description":"Command for connectType=command"},"term":{"type":"string"}},"required":["name","connectType"]}"#,
+        "Create a shellink connection profile. SSH profiles use host, port, username and authentication fields.",
+        r#"{"type":"object","properties":{"name":{"type":"string","description":"Profile display name"},"connectType":{"type":"string","enum":["ssh","command"]},"host":{"type":"string"},"port":{"type":"integer","minimum":1,"maximum":65535},"username":{"type":"string"},"authType":{"type":"string","enum":["password","password-mfa","key","keyboard-interactive"]},"password":{"type":"string","description":"Plaintext password (encrypted by shellink)"},"privateKey":{"type":"string","description":"Private key (encrypted by shellink)"},"passphrase":{"type":"string"},"command":{"type":"string","description":"Command for connectType=command"},"term":{"type":"string"}},"required":["name","connectType"]}"#,
     ),
     (
         "list_sessions",
-        "List all Shellink sessions (active and historical).",
+        "List all shellink sessions (active and historical).",
         r#"{"type":"object","properties":{}}"#,
     ),
     (

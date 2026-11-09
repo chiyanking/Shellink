@@ -3,15 +3,15 @@
   "private": true,
   "version": "0.2.4",
   "type": "module",
-  "description": "Shellink desktop terminal workspace",
+  "description": "shellink desktop terminal workspace",
   "license": "MIT",
-  "homepage": "https://github.com/jie123108/Shellink#readme",
+  "homepage": "https://github.com/jie123108/shellink#readme",
   "bugs": {
-    "url": "https://github.com/jie123108/Shellink/issues"
+    "url": "https://github.com/jie123108/shellink/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jie123108/Shellink.git"
+    "url": "git+https://github.com/jie123108/shellink.git"
   },
   "engines": {
     "node": ">=22.19.0"

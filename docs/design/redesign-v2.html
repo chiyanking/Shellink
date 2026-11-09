@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Shellink V2 · 当前界面设计稿</title>
+<title>shellink V2 · 当前界面设计稿</title>
 <style>
 /* 两套独立配色：纯白靛蓝（默认）/ 墨蓝靛青。终端与界面共享主题。 */
 :root {
@@ -481,7 +481,7 @@ dialog::backdrop { background: var(--overlay); backdrop-filter: blur(4px); }
 </head>
 <body>
 <div class="proto-bar" aria-label="设计稿预览控制">
-  <span class="proto-title grad-text">Shellink V2</span>
+  <span class="proto-title grad-text">shellink V2</span>
   <div class="proto-tabs" id="protoTabs" role="group" aria-label="预览页面">
     <button data-nav="workspace" class="on">工作台</button>
     <button data-nav="connections">连接</button>
@@ -499,7 +499,7 @@ dialog::backdrop { background: var(--overlay); backdrop-filter: blur(4px); }
 <div class="stage"><div class="app" id="app">
   <div class="app-body">
     <nav class="rail" aria-label="主导航">
-      <button class="logo" data-nav="workspace" aria-label="Shellink 工作台" data-i="terminal"></button>
+      <button class="logo" data-nav="workspace" aria-label="shellink 工作台" data-i="terminal"></button>
       <button class="rbtn on" data-nav="workspace" title="工作台 · ⌘1" aria-label="工作台" data-i="terminal"></button>
       <button class="rbtn" data-nav="connections" title="连接管理 · ⌘2" aria-label="连接管理" data-i="server"></button>
       <button class="rbtn" data-nav="integrations" title="AI 接入 · ⌘3" aria-label="AI 接入" data-i="plug"></button>
@@ -514,7 +514,7 @@ dialog::backdrop { background: var(--overlay); backdrop-filter: blur(4px); }
       <header class="main-top">
         <div class="breadcrumbs">
           <button class="icon-btn" id="sidebarToggle" data-action="sidebar" title="收起侧栏" aria-label="收起侧栏" data-i="sidebar"></button>
-          <div><div class="title" id="pageTitle">Workspace</div><div class="crumb" id="pageCrumb">Shellink / 工作台</div></div>
+          <div><div class="title" id="pageTitle">Workspace</div><div class="crumb" id="pageCrumb">shellink / 工作台</div></div>
         </div>
         <button class="cmd-pill" data-action="commands" data-i="search"><span>搜索或输入命令…</span><kbd>⌘ K</kbd></button>
         <div class="top-actions">
@@ -530,7 +530,7 @@ dialog::backdrop { background: var(--overlay); backdrop-filter: blur(4px); }
           <div class="connections-toolbar"><div class="chip-row" id="connectionFilters"></div><div class="toolbar-right"><label class="search" data-i="search"><input id="connectionSearch" aria-label="搜索连接" placeholder="搜索名称、地址或分组…"></label><button class="btn outline" data-action="sort" title="按名称排序" aria-label="连接排序" data-i="sliders"></button></div></div>
           <div class="conn-grid" id="connectionCards"></div>
           <div class="table-footer"><span id="connectionCount"></span><span data-i="shield">连接信息仅保存在本地</span></div>
-          <section class="import-banner"><span data-i="server"></span><div><h3>把熟悉的连接带过来</h3><p>导入 Shellink 连接 JSON，继续使用已有的主机配置。</p></div><button class="btn outline" data-action="import">导入配置 <span data-i="arrow"></span></button></section>
+          <section class="import-banner"><span data-i="server"></span><div><h3>把熟悉的连接带过来</h3><p>导入 shellink 连接 JSON，继续使用已有的主机配置。</p></div><button class="btn outline" data-action="import">导入配置 <span data-i="arrow"></span></button></section>
         </div></section>
         <section class="page" data-page="integrations" aria-label="AI 接入"><div class="page-body">
           <div class="page-head"><div><span class="cap">MCP INTEGRATIONS</span><h1>MCP 接入</h1><p class="sub">让外部 AI 客户端安全访问当前 Desktop 的连接和会话。</p></div><span class="badge blue"><span class="dot green"></span>本地 MCP</span></div>
@@ -568,7 +568,7 @@ dialog::backdrop { background: var(--overlay); backdrop-filter: blur(4px); }
       </div>
     </main>
   </div>
-  <footer class="statusbar"><div><span class="dot green"></span><span>本地工作区</span><span>｜</span><button data-nav="workspace" id="activeCount">3 个活跃会话</button></div><div class="center" data-i="keyboard">⇧ Esc 接管终端</div><div><span class="pid">PID 12345</span><span class="pid">｜</span><span>Shellink 0.2.4</span><span data-i="terminal"></span></div></footer>
+  <footer class="statusbar"><div><span class="dot green"></span><span>本地工作区</span><span>｜</span><button data-nav="workspace" id="activeCount">3 个活跃会话</button></div><div class="center" data-i="keyboard">⇧ Esc 接管终端</div><div><span class="pid">PID 12345</span><span class="pid">｜</span><span>shellink 0.2.4</span><span data-i="terminal"></span></div></footer>
 </div></div>
 <dialog id="dialog" aria-labelledby="dialogTitle"><div class="dialog-head"><h2 id="dialogTitle"></h2><button class="icon-btn" data-action="close-dialog" aria-label="关闭" data-i="x"></button></div><div class="dialog-body" id="dialogBody"></div></dialog>
 <div class="toast" id="toast" role="status" hidden></div>
@@ -671,7 +671,7 @@ function renderContext() {
   }
   const card = page === 'workspace' ? [icon('bot')+'共享终端，随时接管','通过 MCP 与 AI 共用终端。切换到手动控制，即可暂停 AI 写入。'] : page === 'integrations' ? [icon('plug')+'连接你的 AI 工具','选择客户端，复制当前工作区的 MCP 配置，即可开始终端协作。'] : [icon('shield')+'你的设备，你的工作区','连接配置、终端历史与偏好设置保存在本机。']
   $('#context').setAttribute('aria-label',name+'侧面板')
-  $('#context').innerHTML = `<div class="ctx-head"><span>${name}</span>${page === 'workspace' || page === 'connections' ? `<button class="btn grad sm" data-action="${page === 'workspace' ? 'session' : 'connection'}">${icon('plus')}${page === 'workspace' ? '新建' : '新增'}</button>` : ''}<button class="icon-btn ctx-close" data-action="sidebar" aria-label="收起侧栏">${icon('x')}</button></div><div class="ctx-scroll">${content}<div class="ctx-spacer"></div><section class="ctx-card"><h3>${card[0]}</h3><p>${card[1]}</p>${page === 'workspace' ? `<button data-nav="integrations">配置 AI 接入${icon('arrow')}</button>` : ''}</section>${page === 'settings' ? '<div class="ctx-label">Shellink<span>v0.2.4</span></div>' : ''}<button class="ctx-shortcut" data-action="commands">${icon('keyboard')}快速访问<kbd>⌘ K</kbd></button></div>`
+  $('#context').innerHTML = `<div class="ctx-head"><span>${name}</span>${page === 'workspace' || page === 'connections' ? `<button class="btn grad sm" data-action="${page === 'workspace' ? 'session' : 'connection'}">${icon('plus')}${page === 'workspace' ? '新建' : '新增'}</button>` : ''}<button class="icon-btn ctx-close" data-action="sidebar" aria-label="收起侧栏">${icon('x')}</button></div><div class="ctx-scroll">${content}<div class="ctx-spacer"></div><section class="ctx-card"><h3>${card[0]}</h3><p>${card[1]}</p>${page === 'workspace' ? `<button data-nav="integrations">配置 AI 接入${icon('arrow')}</button>` : ''}</section>${page === 'settings' ? '<div class="ctx-label">shellink<span>v0.2.4</span></div>' : ''}<button class="ctx-shortcut" data-action="commands">${icon('keyboard')}快速访问<kbd>⌘ K</kbd></button></div>`
 }
 function terminalLines(session) {
   const profile = profileFor(session)
@@ -718,18 +718,18 @@ function renderConnections() {
   $('[data-action="sort"]').setAttribute('aria-pressed',String(state.sort))
 }
 function getConfig() {
-  const url = 'http://127.0.0.1:7070/shellink/mcp', executable = '/Applications/Shellink.app/Contents/MacOS/shellink'
+  const url = 'http://127.0.0.1:7070/shellink/mcp', executable = '/Applications/shellink.app/Contents/MacOS/shellink'
   if (state.client === 'Codex') return state.transport === 'http'
     ? `[mcp_servers.shellink]\nurl = "${url}"\nhttp_headers = { Authorization = "Bearer ${state.token}" }`
-    : `[mcp_servers.shellink]\ncommand = "${executable}"\nargs = ["mcp"]\nenv = { SHELLINK_HOME = "/Users/demo/Library/Application Support/Shellink" }`
-  return JSON.stringify({mcpServers:{shellink:state.transport === 'http' ? {...(state.client === 'Claude Code' ? {type:'http'} : {}),url,headers:{Authorization:'Bearer '+state.token}} : {command:executable,args:['mcp'],env:{SHELLINK_HOME:'/Users/demo/Library/Application Support/Shellink'}}}},null,2)
+    : `[mcp_servers.shellink]\ncommand = "${executable}"\nargs = ["mcp"]\nenv = { SHELLINK_HOME = "/Users/demo/Library/Application Support/shellink" }`
+  return JSON.stringify({mcpServers:{shellink:state.transport === 'http' ? {...(state.client === 'Claude Code' ? {type:'http'} : {}),url,headers:{Authorization:'Bearer '+state.token}} : {command:executable,args:['mcp'],env:{SHELLINK_HOME:'/Users/demo/Library/Application Support/shellink'}}}},null,2)
 }
 function renderIntegrations() {
   $('#clientTiles').innerHTML = clients.map(([name,symbol]) => `<button class="client-tile ${state.client === name ? 'on' : ''}" data-client="${name}" aria-pressed="${state.client === name}"><span class="mark">${symbol}</span><strong>${name}</strong>${state.client === name ? `<span class="check">${icon('check')}</span>` : ''}</button>`).join('')
   $('#transportChoices').innerHTML = ['http','stdio'].map(transport => `<button class="${state.transport === transport ? 'on' : ''}" data-transport="${transport}" aria-pressed="${state.transport === transport}">${transport === 'http' ? 'HTTP' : 'stdio'}</button>`).join('')
   $('#configFilename').textContent = state.client === 'Codex' ? 'config.toml' : 'mcp.json'
   $('#clientConfig').textContent = getConfig()
-  $('#transportNote').textContent = state.transport === 'stdio' ? 'stdio 已就绪，关闭 HTTP 后仍可使用；需要保持 Shellink 桌面运行。' : state.http ? 'HTTP 已启动，使用当前地址和 Token 连接。' : 'HTTP 尚未启动，请开启右侧 MCP HTTP 开关。'
+  $('#transportNote').textContent = state.transport === 'stdio' ? 'stdio 已就绪，关闭 HTTP 后仍可使用；需要保持 shellink 桌面运行。' : state.http ? 'HTTP 已启动，使用当前地址和 Token 连接。' : 'HTTP 尚未启动，请开启右侧 MCP HTTP 开关。'
   $('#httpStatus').textContent = state.http ? 'HTTP 已启动 · Token 认证' : 'HTTP MCP 已关闭，stdio 仍可使用'
   $('[data-action="http"]').classList.toggle('on',state.http)
   $('[data-action="http"]').setAttribute('aria-checked',String(state.http))
@@ -758,9 +758,9 @@ function settingRow(title, description, control) {
 function renderSettings() {
   $('#settingsMobileNav').innerHTML = settingsTabs.map(([id,label]) => `<button class="chip ${state.settings === id ? 'on' : ''}" data-setting="${id}" aria-pressed="${state.settings === id}">${label}</button>`).join('')
   let content
-  if (state.settings === 'general') content = `<section class="settings-section"><h2>工作区</h2><p>打开即用，下次继续。</p>${settingRow('启动时恢复工作区','恢复上次查看的会话，在左侧列表切换其他会话。',`<button class="tog ${state.restore ? 'on' : ''}" data-action="restore" role="switch" aria-checked="${state.restore}" aria-label="启动时恢复工作区"></button>`)}</section><section class="settings-section"><h2>语言与数据</h2>${settingRow('界面语言','选择 Shellink 显示的语言。','<select aria-label="界面语言"><option>简体中文</option></select>')}${settingRow('数据目录','~/Library/Application Support/Shellink',`<button class="btn outline sm" data-action="data-dir">${icon('server')}打开目录</button>`)}</section>`
-  else if (state.settings === 'appearance') content = `<section class="settings-section"><h2>外观</h2><p>安静的界面，让注意力回到终端。</p><div class="theme-preview">${['light','dark'].map(theme => `<button class="tp-card tp-${theme} ${document.documentElement.dataset.theme === theme ? 'on' : ''}" data-theme="${theme}" aria-pressed="${document.documentElement.dataset.theme === theme}"><div class="tp-view"><div class="side"></div><div class="b"><i></i><i></i><i></i></div></div><div class="tp-lb">${icon(theme === 'dark' ? 'moon' : 'sun')}${theme === 'dark' ? '墨蓝 · 靛青' : '纯白 · 靛蓝'}${document.documentElement.dataset.theme === theme ? `<span class="selected-check">${icon('check')}</span>` : ''}</div></button>`).join('')}</div>${settingRow('终端字体','为代码和命令输出选择等宽字体。',`<select id="fontChoice" aria-label="终端字体">${['JetBrains Mono','SF Mono','Menlo'].map(font => `<option ${state.font === font ? 'selected' : ''}>${font}</option>`).join('')}</select>`)}${settingRow('字体大小','调整终端文字的显示大小。',`<select id="fontSizeChoice" aria-label="终端字体大小">${['12','13','14','16'].map(size => `<option value="${size}" ${state.fontSize === size ? 'selected' : ''}>${size} px</option>`).join('')}</select>`)}<div class="font-demo"><span class="p">deploy@prod-web-01</span> ~/app<br>❯ echo "Hello, Shellink."<br><span class="p">Hello, Shellink.</span></div></section>`
-  else content = `<section class="settings-section"><h2>自动化与后台</h2><p>后台运行信息与本地集成入口。</p>${settingRow('Desktop 核心','/Applications/Shellink.app/Contents/MacOS/shellink · PID 12345','<span class="badge green"><span class="dot green"></span>运行中</span>')}${settingRow('HTTP 服务','http://127.0.0.1:7070','<span class="badge green">运行中</span>')}${settingRow('活动会话','Desktop 实时状态',`<span class="badge">${active().length}</span>`)}${settingRow('诊断信息','查看 Desktop 核心、版本和运行环境。','<button class="btn outline sm" data-action="diagnostics">查看诊断</button>')}<div class="settings-note">${icon('shield')}会话和 MCP 服务随 Desktop 窗口运行，关闭窗口后会一并停止。</div></section>`
+  if (state.settings === 'general') content = `<section class="settings-section"><h2>工作区</h2><p>打开即用，下次继续。</p>${settingRow('启动时恢复工作区','恢复上次查看的会话，在左侧列表切换其他会话。',`<button class="tog ${state.restore ? 'on' : ''}" data-action="restore" role="switch" aria-checked="${state.restore}" aria-label="启动时恢复工作区"></button>`)}</section><section class="settings-section"><h2>语言与数据</h2>${settingRow('界面语言','选择 shellink 显示的语言。','<select aria-label="界面语言"><option>简体中文</option></select>')}${settingRow('数据目录','~/Library/Application Support/shellink',`<button class="btn outline sm" data-action="data-dir">${icon('server')}打开目录</button>`)}</section>`
+  else if (state.settings === 'appearance') content = `<section class="settings-section"><h2>外观</h2><p>安静的界面，让注意力回到终端。</p><div class="theme-preview">${['light','dark'].map(theme => `<button class="tp-card tp-${theme} ${document.documentElement.dataset.theme === theme ? 'on' : ''}" data-theme="${theme}" aria-pressed="${document.documentElement.dataset.theme === theme}"><div class="tp-view"><div class="side"></div><div class="b"><i></i><i></i><i></i></div></div><div class="tp-lb">${icon(theme === 'dark' ? 'moon' : 'sun')}${theme === 'dark' ? '墨蓝 · 靛青' : '纯白 · 靛蓝'}${document.documentElement.dataset.theme === theme ? `<span class="selected-check">${icon('check')}</span>` : ''}</div></button>`).join('')}</div>${settingRow('终端字体','为代码和命令输出选择等宽字体。',`<select id="fontChoice" aria-label="终端字体">${['JetBrains Mono','SF Mono','Menlo'].map(font => `<option ${state.font === font ? 'selected' : ''}>${font}</option>`).join('')}</select>`)}${settingRow('字体大小','调整终端文字的显示大小。',`<select id="fontSizeChoice" aria-label="终端字体大小">${['12','13','14','16'].map(size => `<option value="${size}" ${state.fontSize === size ? 'selected' : ''}>${size} px</option>`).join('')}</select>`)}<div class="font-demo"><span class="p">deploy@prod-web-01</span> ~/app<br>❯ echo "Hello, shellink."<br><span class="p">Hello, shellink.</span></div></section>`
+  else content = `<section class="settings-section"><h2>自动化与后台</h2><p>后台运行信息与本地集成入口。</p>${settingRow('Desktop 核心','/Applications/shellink.app/Contents/MacOS/shellink · PID 12345','<span class="badge green"><span class="dot green"></span>运行中</span>')}${settingRow('HTTP 服务','http://127.0.0.1:7070','<span class="badge green">运行中</span>')}${settingRow('活动会话','Desktop 实时状态',`<span class="badge">${active().length}</span>`)}${settingRow('诊断信息','查看 Desktop 核心、版本和运行环境。','<button class="btn outline sm" data-action="diagnostics">查看诊断</button>')}<div class="settings-note">${icon('shield')}会话和 MCP 服务随 Desktop 窗口运行，关闭窗口后会一并停止。</div></section>`
   $('#settingsContent').innerHTML = content
 }
 function setTheme(theme) {
@@ -775,7 +775,7 @@ function go(page) {
   state.page = page
   $$('.page').forEach(el => el.classList.toggle('on',el.dataset.page === page))
   $$('.rbtn[data-nav], #protoTabs [data-nav]').forEach(el => { el.classList.toggle('on',el.dataset.nav === page); el.setAttribute('aria-pressed',String(el.dataset.nav === page)) })
-  $('#pageTitle').textContent = titles[page][0]; $('#pageCrumb').textContent = 'Shellink / '+titles[page][1]
+  $('#pageTitle').textContent = titles[page][0]; $('#pageCrumb').textContent = 'shellink / '+titles[page][1]
   renderContext()
   if (page === 'workspace') renderWorkspace()
   if (page === 'connections') renderConnections()
@@ -849,15 +849,15 @@ document.addEventListener('click', event => {
     case 'rotate-token': state.token = '<已轮换的工作区 Token>'; renderIntegrations(); notify('已轮换 MCP Token'); break
     case 'sort': state.sort = !state.sort; renderConnections(); notify(state.sort ? '已按名称排序' : '已恢复默认排序'); break
     case 'restore': state.restore = !state.restore; renderSettings(); break
-    case 'data-dir': openDialog('数据目录','<p class="dialog-caption mono">~/Library/Application Support/Shellink</p>'); break
-    case 'diagnostics': openDialog('诊断信息','<p class="dialog-caption mono">Shellink 0.2.4<br>PID 12345 · macOS<br>Desktop 核心运行中<br>日志：~/Library/Application Support/Shellink/logs</p>'); break
+    case 'data-dir': openDialog('数据目录','<p class="dialog-caption mono">~/Library/Application Support/shellink</p>'); break
+    case 'diagnostics': openDialog('诊断信息','<p class="dialog-caption mono">shellink 0.2.4<br>PID 12345 · macOS<br>Desktop 核心运行中<br>日志：~/Library/Application Support/shellink/logs</p>'); break
     case 'export-history': {
       const blob = new Blob([JSON.stringify({sessionId:state.history,chunks:historyChunks(state.history)},null,2)],{type:'application/json'}), url = URL.createObjectURL(blob), link = document.createElement('a')
       link.href = url; link.download = 'shellink-'+state.history+'-history.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url),0); notify('已导出终端历史'); break
     }
     case 'session': openDialog('新建会话',`<form id="sessionForm"><label>连接<select name="profileId">${profiles.map(profile => `<option value="${profile.id}">${escapeHTML(profile.name)}</option>`).join('')}</select></label><label>会话名称<input name="name" placeholder="例如：部署与服务检查" maxlength="80"></label><label>控制权模式<select name="mode"><option value="MANUAL">手动控制</option><option value="AUTO">AI 自动</option></select></label><div class="dialog-actions"><button type="button" class="btn outline" data-action="close-dialog">取消</button><button class="btn grad" type="submit">创建会话</button></div></form>`); break
     case 'connection': openDialog('新增连接',`<form id="connectionForm"><label>连接名称<input name="name" required placeholder="例如：dev-server" maxlength="80"></label><label>连接类型<select name="type"><option>SSH</option><option value="Local">本地终端</option></select></label><label>主机地址 / 本地命令<input name="host" required placeholder="192.0.2.10 或 /bin/zsh"></label><label>用户名<input name="user" placeholder="root"></label><label>端口<input name="port" type="number" value="22" min="1" max="65535"></label><div class="dialog-actions"><button type="button" class="btn outline" data-action="close-dialog">取消</button><button class="btn grad" type="submit">保存连接</button></div></form>`); break
-    case 'import': openDialog('导入连接',`<p class="dialog-caption">选择 Shellink 导出的连接 JSON 文件。</p><form id="importForm"><label style="margin-top:16px">连接配置<textarea name="json" rows="6" required placeholder='[{"name":"dev-server","host":"192.0.2.10","username":"root","port":22}]'></textarea></label><div class="dialog-actions"><button type="button" class="btn outline" data-action="close-dialog">取消</button><button class="btn grad" type="submit">导入配置</button></div></form>`); break
+    case 'import': openDialog('导入连接',`<p class="dialog-caption">选择 shellink 导出的连接 JSON 文件。</p><form id="importForm"><label style="margin-top:16px">连接配置<textarea name="json" rows="6" required placeholder='[{"name":"dev-server","host":"192.0.2.10","username":"root","port":22}]'></textarea></label><div class="dialog-actions"><button type="button" class="btn outline" data-action="close-dialog">取消</button><button class="btn grad" type="submit">导入配置</button></div></form>`); break
   }
 })
 document.addEventListener('input', event => {

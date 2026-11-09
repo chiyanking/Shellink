@@ -38,7 +38,7 @@ pub(super) fn write_discovery(
 
 fn discovery_address(home: &Path) -> Result<SocketAddr, String> {
     let file = fs::File::open(home.join(DISCOVERY_FILE))
-        .map_err(|_| "Desktop MCP is unavailable. Start the Shellink Desktop first.".to_owned())?;
+        .map_err(|_| "Desktop MCP is unavailable. Start the shellink Desktop first.".to_owned())?;
     let mut text = String::new();
     file.take(4097)
         .read_to_string(&mut text)
@@ -62,7 +62,7 @@ pub fn run_stdio() {
     let db = match DataStore::open() {
         Ok(db) => db,
         Err(error) => {
-            let _ = writeln!(io::stderr(), "Shellink MCP stdio unavailable: {error}");
+            let _ = writeln!(io::stderr(), "shellink MCP stdio unavailable: {error}");
             return;
         }
     };
@@ -78,12 +78,12 @@ pub fn run_stdio() {
         {
             Ok(0) => break,
             Ok(_) if line.len() > MAX_BODY_BYTES => {
-                let _ = writeln!(io::stderr(), "Shellink MCP stdio message exceeds 4 MiB");
+                let _ = writeln!(io::stderr(), "shellink MCP stdio message exceeds 4 MiB");
                 break;
             }
             Ok(_) => {}
             Err(error) => {
-                let _ = writeln!(io::stderr(), "Shellink MCP stdio read failed: {error}");
+                let _ = writeln!(io::stderr(), "shellink MCP stdio read failed: {error}");
                 break;
             }
         }
@@ -125,7 +125,7 @@ pub fn run_stdio() {
                 }
             }
             Err(error) => {
-                let _ = writeln!(io::stderr(), "Shellink MCP request failed: {error}");
+                let _ = writeln!(io::stderr(), "shellink MCP request failed: {error}");
             }
         }
     }

@@ -1,6 +1,6 @@
-# Shellink
+# shellink
 
-Shellink is a local desktop terminal workspace built with React, Tauri, and a Rust core. It stores connection profiles, terminal history, MCP configuration, and incoming Webhook messages in one local data directory.
+shellink is a local desktop terminal workspace built with React, Tauri, and a Rust core. It stores connection profiles, terminal history, MCP configuration, and incoming Webhook messages in one local data directory.
 
 The Rust core is part of the Desktop process. Closing the main window stops every terminal child process, the MCP HTTP listener, and the local stdio bridge. There is no separate daemon or sidecar process.
 
@@ -84,7 +84,7 @@ The ten MCP tools are `list_profiles`, `create_profile`, `list_sessions`, `creat
 
 ## Data and security
 
-The default data directory is `$HOME/.Shellink` on macOS/Linux and `%APPDATA%\\Shellink` on Windows. Set `SHELLINK_HOME` to use another directory. `master.key` and the SQLite database are created with private permissions where supported.
+The default data directory is `$HOME/.shellink` on macOS/Linux and `%APPDATA%\\shellink` on Windows. Set `SHELLINK_HOME` to use another directory. `master.key` and the SQLite database are created with private permissions where supported.
 
 Command profiles execute their configured command with the Desktop user's permissions. Only use trusted commands and scripts. Keep the MCP listener on loopback unless a network listener is explicitly required, and rotate the MCP token after exposing it to another machine.
 

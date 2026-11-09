@@ -313,7 +313,7 @@ export default function App() {
                   </Hint>
                   <div className="topbar-title">
                     <strong>{navigation.find(item => item.id === page)?.title ?? 'Preferences'}</strong>
-                    <span>Shellink / {pageNames[page]}</span>
+                    <span>shellink / {pageNames[page]}</span>
                   </div>
                 </div>
                 <button className="command-search" onClick={() => { setCommandQuery(''); setModal('commands') }}>
@@ -514,9 +514,9 @@ export default function App() {
           open={modal === 'import'}
           onOpenChange={(open) => !open && setModal(null)}
           title="导入已有连接"
-          description="把常用主机带入 Shellink，无需从头配置。"
+          description="把常用主机带入 shellink，无需从头配置。"
         >
-          <p>导入 Shellink 连接 JSON 对象或数组，文件内容仅发送到本机后台。导入会新增连接。</p>
+          <p>导入 shellink 连接 JSON 对象或数组，文件内容仅发送到本机后台。导入会新增连接。</p>
           <input type="file" accept=".json,application/json" onChange={async event => { const file = event.target.files?.[0]; if (file) setImportText(await file.text()) }} />
           <textarea className="ui-input import-json" rows={10} value={importText} onChange={event => setImportText(event.target.value)} aria-label="连接 JSON" placeholder='[{"name":"本地终端","connectType":"command","command":"/bin/sh"}]' />
           <Button disabled={saving || !importText.trim()} onClick={async () => { setSaving(true); try { const json = JSON.parse(importText); const profiles = Array.isArray(json) ? json : [json]; for (const profile of profiles) await rpc('profiles.create', profile); await refresh(); setImportText(''); setModal(null); notify(`已导入 ${profiles.length} 个连接`) } catch (error) { await refresh(); notify(`导入中止，已成功写入的连接会保留：${errorText(error)}`) } finally { setSaving(false) } }}>导入连接</Button>
@@ -604,7 +604,7 @@ export default function App() {
               <ArrowRight size={12} />
               选择项目后打开
             </span>
-            <span>Shellink 快速访问</span>
+            <span>shellink 快速访问</span>
           </div>
         </Dialog>
         {toast && (

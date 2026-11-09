@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Shellink are documented in this file.
+All notable changes to shellink are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
@@ -38,7 +38,7 @@ The GitHub Release body is generated from the matching section in this file
 
 ### Added
 
-- Optional DeepSeek Harness bundle `shellink-dsh`: talks to a local Shellink daemon over the Unix socket and exposes remote sessions as typed agent tools (open, exec, input, transfer, edit, profiles). Install from npm or a source checkout; the plugin does not embed the session engine or credential store.
+- Optional DeepSeek Harness bundle `shellink-dsh`: talks to a local shellink daemon over the Unix socket and exposes remote sessions as typed agent tools (open, exec, input, transfer, edit, profiles). Install from npm or a source checkout; the plugin does not embed the session engine or credential store.
 - Approval gate for `shellink-dsh`: ask through DeepSeek Harness `ctx.approval` before opening a session, running a dangerous remote command, writing a `command` profile, switching `MANUAL` back to `AUTO`, or transferring a sensitive path. Grants are one-shot and remembered in-process per agent session only.
 
 ### Fixed
@@ -89,7 +89,7 @@ The GitHub Release body is generated from the matching section in this file
 
 - Lower default timeouts for foreground `exec` / `edit` so typical agent calls finish inside short host windows; use detach jobs for longer work.
 - Raise SSH `keepaliveCountMax` so long PTY transfers are less likely to be dropped around ~45s of idle-looking traffic.
-- Clarify in docs that Shellink does not implement a host's automatic login flow; use `expect`, `sshpass`, or `ProxyJump` for those cases.
+- Clarify in docs that shellink does not implement a host's automatic login flow; use `expect`, `sshpass`, or `ProxyJump` for those cases.
 
 ### Fixed
 
@@ -107,11 +107,11 @@ Standalone binaries for:
 
 Verify downloads with `SHA256SUMS.txt`.
 
-Full documentation: [README.md](https://github.com/jie123108/Shellink/blob/v0.2.0/README.md) · [中文文档](https://github.com/jie123108/Shellink/blob/v0.2.0/README.zh-CN.md)
+Full documentation: [README.md](https://github.com/jie123108/shellink/blob/v0.2.0/README.md) · [中文文档](https://github.com/jie123108/shellink/blob/v0.2.0/README.zh-CN.md)
 
 ## [0.1.0] - 2026-07-19
 
-First public release of Shellink — an open-source session middleware for AI
+First public release of shellink — an open-source session middleware for AI
 agents and humans working with SSH and local terminal sessions. It provides one
 stable CLI for connection profiles, interactive sessions, command execution,
 file transfer, remote editing, and session state. A local daemon owns the
@@ -129,9 +129,9 @@ compatibility APIs.
 - **CLI/TUI, Web UI, REST, and WebSocket:** Use the interface that fits the workflow, with stable `--json` output for automation.
 - **Encrypted profiles and optional single-file binaries:** Credentials are protected in SQLite, and Bun builds are available for macOS and Linux.
 
-### Why Shellink Is Designed for AI Agents
+### Why shellink Is Designed for AI Agents
 
-Shellink is designed around the situations where an AI agent needs reliable access but should not guess or bypass human controls:
+shellink is designed around the situations where an AI agent needs reliable access but should not guess or bypass human controls:
 
 - **Scriptable multi-hop access:** Agents can reuse `expect` or other custom login scripts for several bastion hops instead of implementing each site's authentication flow themselves.
 - **PTY-based continuity:** Commands and file transfers use the same PTY path, so an agent can work through jump hosts even when no direct SFTP or SSH endpoint is available.
@@ -150,6 +150,6 @@ This release includes standalone binaries for:
 
 Verify downloads with `SHA256SUMS.txt`.
 
-> **Security warning:** `command` profiles execute their configured command as the server process user. Run Shellink only in a trusted environment and protect `SHELLINK_TOKEN`. Prefer read-only or non-production targets for AI agents.
+> **Security warning:** `command` profiles execute their configured command as the server process user. Run shellink only in a trusted environment and protect `SHELLINK_TOKEN`. Prefer read-only or non-production targets for AI agents.
 
-Full documentation: [README.md](https://github.com/jie123108/Shellink/blob/v0.1.0/README.md) · [中文文档](https://github.com/jie123108/Shellink/blob/v0.1.0/README.zh-CN.md)
+Full documentation: [README.md](https://github.com/jie123108/shellink/blob/v0.1.0/README.md) · [中文文档](https://github.com/jie123108/shellink/blob/v0.1.0/README.zh-CN.md)

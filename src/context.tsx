@@ -57,6 +57,6 @@ export type DesignContext = {
 export const Design = createContext<DesignContext | null>(null)
 export function useDesign() {
   const context = useContext(Design)
-  if (!context) throw new Error('Shellink design context is missing')
+  if (!context) throw new Error('shellink design context is missing')
   return context
 }

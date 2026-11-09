@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-const DESKTOP_REQUIRED = '当前是浏览器预览，没有 Shellink 桌面后端。请在项目目录运行 npm run desktop:dev 打开原生窗口后再使用。'
+const DESKTOP_REQUIRED = '当前是浏览器预览，没有 shellink 桌面后端。请在项目目录运行 npm run desktop:dev 打开原生窗口后再使用。'
 
 export type Profile = { id: string; name: string; connectType: 'ssh' | 'command'; host: string; port: number; username: string; authType: 'password' | 'password-mfa' | 'key' | 'keyboard-interactive'; command: string | null; hasPassword: boolean; hasPrivateKey: boolean; term: string; cols: number; rows: number }
 export type SessionRecord = { id: string; profileId: string; profileName: string; name: string; source: string; target: string; state: string; mode: 'AUTO' | 'MANUAL'; createdAt: number; closedAt?: number; closeReason?: string; active: boolean }

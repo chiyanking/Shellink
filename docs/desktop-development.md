@@ -1,6 +1,6 @@
 # Desktop 开发
 
-Shellink Desktop 位于仓库根目录，使用 Vite、React 和 Tauri v2。业务核心由 `src-tauri/src/` 中的 Rust 代码提供，Tauri 窗口、Rust 数据库、终端子进程和 MCP HTTP 监听器属于同一个生命周期。
+shellink Desktop 位于仓库根目录，使用 Vite、React 和 Tauri v2。业务核心由 `src-tauri/src/` 中的 Rust 代码提供，Tauri 窗口、Rust 数据库、终端子进程和 MCP HTTP 监听器属于同一个生命周期。
 
 ## 常用命令
 

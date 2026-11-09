@@ -1,8 +1,8 @@
 [package]
 name = "shellink-desktop"
 version = "0.2.4"
-description = "Shellink desktop terminal workspace"
-authors = ["Shellink contributors"]
+description = "shellink desktop terminal workspace"
+authors = ["shellink contributors"]
 license = "MIT"
 edition = "2024"
 

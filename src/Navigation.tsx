@@ -26,8 +26,8 @@ export const settingsNavigation: { id: SettingsTab; label: string; icon: typeof 
 export function NavigationRail() {
   const { page, navigate, openModal, runtime } = useDesign()
   return <nav className="navigation-rail" aria-label="主导航">
-    <Hint label="Shellink · 个人工作区">
-      <button className="rail-logo" aria-label="Shellink 工作台" onClick={() => navigate('workspace')}><Terminal size={20} strokeWidth={2.4} /></button>
+    <Hint label="shellink · 个人工作区">
+      <button className="rail-logo" aria-label="shellink 工作台" onClick={() => navigate('workspace')}><Terminal size={20} strokeWidth={2.4} /></button>
     </Hint>
     {navigation.map(item => <Hint key={item.id} label={`${item.label} · ⌘${item.shortcut}`}>
       <button className={cn('rail-button', page === item.id && 'is-active')} aria-label={item.label} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><item.icon size={19} /></button>
@@ -189,7 +189,7 @@ export function ContextPanel() {
         <p>{page === 'workspace' ? '通过 MCP 与 AI 共用终端。切换到手动控制，即可暂停 AI 写入。' : page === 'integrations' ? '选择客户端，复制当前工作区的 MCP 配置，即可开始终端协作。' : '连接配置、终端历史与偏好设置保存在本机。'}</p>
         {page === 'workspace' && <button onClick={() => navigate('integrations')}>配置 AI 接入<ArrowUpRight size={11} /></button>}
       </section>
-      {page === 'settings' && <div className="context-version"><Terminal size={12} />Shellink<span>v{runtime?.status.version ?? '0.2.4'}</span></div>}
+      {page === 'settings' && <div className="context-version"><Terminal size={12} />shellink<span>v{runtime?.status.version ?? '0.2.4'}</span></div>}
       <button className="context-shortcut" onClick={() => openModal('commands')}><Keyboard size={12} /><span>快速访问</span><kbd>⌘ K</kbd></button>
     </div>
   </aside>

@@ -727,11 +727,11 @@ fn resolve_data_home_from(
                     .or(home)
                     .map(|path| path.join("AppData").join("Roaming"))
             })
-            .ok_or_else(|| "无法确定 Shellink 数据目录".to_string())?
-            .join("Shellink")
+            .ok_or_else(|| "无法确定 shellink 数据目录".to_string())?
+            .join("shellink")
     } else {
-        home.ok_or_else(|| "无法确定 Shellink 数据目录".to_string())?
-            .join(".Shellink")
+        home.ok_or_else(|| "无法确定 shellink 数据目录".to_string())?
+            .join(".shellink")
     };
     make_absolute(path)
 }
@@ -1140,7 +1140,7 @@ mod tests {
         let home = PathBuf::from("/users/shellink");
         assert_eq!(
             resolve_data_home_from(None, None, Some(home.clone()), None, false).unwrap(),
-            home.join(".Shellink")
+            home.join(".shellink")
         );
         assert_eq!(
             resolve_data_home_from(
@@ -1151,7 +1151,7 @@ mod tests {
                 true
             )
             .unwrap(),
-            PathBuf::from("/appdata/Shellink")
+            PathBuf::from("/appdata/shellink")
         );
         assert_eq!(
             resolve_data_home_from(Some(PathBuf::from("/custom")), None, Some(home), None, true,)
@@ -1167,7 +1167,7 @@ mod tests {
                 true,
             )
             .unwrap(),
-            PathBuf::from("/users/shellink/AppData/Roaming/Shellink")
+            PathBuf::from("/users/shellink/AppData/Roaming/shellink")
         );
     }
 

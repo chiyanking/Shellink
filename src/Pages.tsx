@@ -96,7 +96,7 @@ export function ConnectionsPage() {
     {emptyGroup && <div className="empty-state"><FolderOpen size={25} /><h3>此分组还没有连接</h3><p>将连接拖入此分组，或添加一个新连接。</p><Button variant="outline" onClick={() => openModal('connection')}><Plus size={13} />添加连接</Button></div>}
     {!shown.length && profiles.length > 0 && !emptyGroup && <div className="empty-state"><Search size={25} /><h3>没有匹配的连接</h3><p>试试其他名称、地址或分组。</p><Button variant="outline" onClick={() => { setSearch(''); setConnectionGroup(null) }}>清除筛选</Button></div>}
     <div className="table-footer"><span>共 {shown.length} 个连接</span><span><ShieldCheck size={13} />连接信息仅保存在本地</span></div>
-    <section className="import-banner"><div className="import-banner-icon"><FolderOpen size={22} /></div><div><h3>把熟悉的连接带过来</h3><p>导入 Shellink 连接 JSON，继续使用已有的主机配置。</p></div><Button variant="outline" onClick={() => openModal('import')}>导入配置<ArrowRight size={14} /></Button></section>
+    <section className="import-banner"><div className="import-banner-icon"><FolderOpen size={22} /></div><div><h3>把熟悉的连接带过来</h3><p>导入 shellink 连接 JSON，继续使用已有的主机配置。</p></div><Button variant="outline" onClick={() => openModal('import')}>导入配置<ArrowRight size={14} /></Button></section>
   </div>
 }
 
@@ -214,7 +214,7 @@ export function IntegrationsPage() {
           <div className="integration-note">
             <CircleHelp size={14} />
             <span>{transport === 'stdio'
-              ? mcp?.stdioRunning ? 'stdio 已就绪，关闭 HTTP 后仍可使用；需要保持 Shellink 桌面运行。' : mcp?.stdioError ?? 'stdio 尚未就绪，请检查桌面后台状态。'
+              ? mcp?.stdioRunning ? 'stdio 已就绪，关闭 HTTP 后仍可使用；需要保持 shellink 桌面运行。' : mcp?.stdioError ?? 'stdio 尚未就绪，请检查桌面后台状态。'
               : mcp?.running ? 'HTTP 已启动，使用当前地址和 Token 连接。' : mcp?.error ?? 'HTTP 尚未启动，请开启右侧 MCP HTTP 开关。'}</span>
           </div>
           <div className="integration-next-step">
@@ -336,7 +336,7 @@ export function SettingsPage() {
               <div className="settings-section-title">
                 <h2>语言与数据</h2>
               </div>
-              <SettingRow title="界面语言" description="选择 Shellink 显示的语言。">
+              <SettingRow title="界面语言" description="选择 shellink 显示的语言。">
                 <Select
                   label="界面语言"
                   value="zh-CN"
@@ -423,9 +423,9 @@ export function SettingsPage() {
                 style={{ fontFamily: `"${font}", monospace`, fontSize: `${size}px` }}
               >
                 <span>deploy@prod-web-01</span> ~/app
-                <br />❯ echo "Hello, Shellink."
+                <br />❯ echo "Hello, shellink."
                 <br />
-                <span>Hello, Shellink.</span>
+                <span>Hello, shellink.</span>
               </div>
             </>
           )}

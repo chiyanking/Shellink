@@ -6,7 +6,7 @@
  *   node scripts/extract-release-notes.mjs <version> [outputPath]
  *
  * Accepts "0.1.0" or "v0.1.0". Writes the matching "## [0.1.0] ..." section
- * (heading rewritten as "# Shellink 0.1.0") to the output file, or stdout
+ * (heading rewritten as "# shellink 0.1.0") to the output file, or stdout
  * when outputPath is omitted.
  */
 import fs from 'node:fs'
@@ -67,7 +67,7 @@ const bodyLines = lines.slice(start + 1, end)
 while (bodyLines.length > 0 && bodyLines[0] === '') bodyLines.shift()
 while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === '') bodyLines.pop()
 
-const notes = [`# Shellink ${version}`, '', ...bodyLines, ''].join('\n')
+const notes = [`# shellink ${version}`, '', ...bodyLines, ''].join('\n')
 
 if (outputPath) {
   fs.mkdirSync(path.dirname(path.resolve(outputPath)), { recursive: true })

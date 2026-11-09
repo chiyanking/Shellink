@@ -29,6 +29,6 @@ master.key
 # local binary backups
 .backup/
 # build artifacts (delivered binary is not versioned)
-Shellink-Windows-x64/
+shellink-Windows-x64/
 /.worktrees/
 /.workbuddy/

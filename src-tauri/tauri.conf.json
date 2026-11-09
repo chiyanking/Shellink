@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Shellink",
+  "productName": "shellink",
   "version": "0.2.4",
   "identifier": "com.shellink.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Shellink",
+        "title": "shellink",
         "width": 1400,
         "height": 918,
         "center": true,
