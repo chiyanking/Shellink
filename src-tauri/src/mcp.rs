@@ -51,7 +51,7 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "out",
-        "Read the terminal output produced since the previous call. Empty text means no new output. Use state for a stateless latest-output snapshot.",
+        "Read the terminal output produced since the previous call. The read position starts at the first send or raw. Empty text means no new output. Use state for a stateless latest-output snapshot.",
         r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
     ),
     (
@@ -323,7 +323,7 @@ fn process_request_with(
                     SUPPORTED_VERSIONS[0]
                 };
                 Ok(
-                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"out returns terminal output since the previous call; empty text means no new output. state returns a latest-output snapshot. send submits a command to an AUTO session and adds a newline unless text ends with LF or CR; raw sends text verbatim. A send success means input was sent, not that the command finished. SSH MFA must be completed in the Desktop dialog."}),
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"out returns terminal output since the previous call; the read position starts at the first send or raw, and empty text means no new output. state returns a latest-output snapshot. send submits a command to an AUTO session and adds a newline unless text ends with LF or CR; raw sends text verbatim. A send success means input was sent, not that the command finished. SSH MFA must be completed in the Desktop dialog."}),
                 )
             }
             None => Err((-32602, "initialize requires protocolVersion".into())),
@@ -524,12 +524,8 @@ fn read_output(db: &DataStore, manager: &SessionManager, args: &Value) -> Result
         )
     };
     let text = match manager.output_cursor(id) {
-        // First read of a session: prime the position with a context snapshot.
-        None => {
-            let snapshot = db.read_output_latest(id, 200)?;
-            manager.set_output_cursor(id, position(&snapshot));
-            snapshot["text"].clone()
-        }
+        // The AI has not sent anything yet, so there is nothing to observe.
+        None => json!(""),
         // Drain the output produced since the previous read.
         Some((seq, chars)) => {
             let drained = db.read_output_after(id, seq, chars)?;
@@ -644,12 +640,22 @@ mod tests {
         let manager = SessionManager::new();
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
             .unwrap();
-        // The first read primes the position with a context snapshot.
+        // Before the AI has sent anything there is no read position, so out is
+        // empty whatever the output history holds.
         db.add_output("s", "first\n").unwrap();
-        let primed = invoke(&db, &manager, "out", json!({"id":"s"}));
+        let idle = invoke(&db, &manager, "out", json!({"id":"s"}));
         assert_eq!(
-            primed["structuredContent"],
-            json!({"text":"first\n","active":true})
+            idle["structuredContent"],
+            json!({"text":"","active":true})
+        );
+        // The first send fixes the position at the end of the existing output.
+        let end = db.read_output_latest("s", 1).unwrap();
+        manager.set_output_cursor(
+            "s",
+            (
+                end["lastSeq"].as_i64().unwrap(),
+                end["lastChar"].as_u64().unwrap() as usize,
+            ),
         );
         // Later reads return only the output produced since the previous read.
         db.add_output("s", "latest\n").unwrap();

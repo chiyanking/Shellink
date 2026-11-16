@@ -231,6 +231,18 @@ impl SessionManager {
         }
         let session = live.get_mut(id).ok_or("Session not found")?;
         Self::guard_auth(session)?;
+        // The AI's first action fixes its reading start: out returns only the
+        // output produced after this point. Later inputs never move the cursor.
+        if self.output_cursor(id).is_none() {
+            let end = db.read_output_latest(id, 1)?;
+            self.set_output_cursor(
+                id,
+                (
+                    end["lastSeq"].as_i64().unwrap_or_default(),
+                    end["lastChar"].as_u64().unwrap_or_default() as usize,
+                ),
+            );
+        }
         Self::forward_pty(session, text)?;
         let display = readable_command(text);
         // A trailing newline submits the command but is not part of its text.
@@ -760,6 +772,36 @@ mod tests {
                 "ec",
             ]
         );
+        manager.shutdown(&db);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn api_input_starts_the_ai_read_cursor_once() {
+        let db = DataStore::test_store(PathBuf::new());
+        db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
+            .unwrap();
+        db.add_output("s", "before\n").unwrap();
+        let manager = SessionManager::new();
+        let mut command = CommandBuilder::new("/bin/sleep");
+        command.arg("30");
+        let (mut live, _output) = spawn_terminal(command, 120, 36).unwrap();
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        live.input = Arc::new(Mutex::new(Box::new(Capture(captured.clone()))));
+        manager.live.lock().unwrap().insert("s".into(), live);
+
+        // The first API input fixes the read position at the current end of output.
+        manager.input_api(&db, "s", "echo hi").unwrap();
+        let end = db.read_output_latest("s", 1).unwrap();
+        let expected = Some((
+            end["lastSeq"].as_i64().unwrap(),
+            end["lastChar"].as_u64().unwrap() as usize,
+        ));
+        assert_eq!(manager.output_cursor("s"), expected);
+        // Later inputs never move the cursor, so their predecessors stay readable.
+        db.add_output("s", "more\n").unwrap();
+        manager.input_api(&db, "s", "echo again").unwrap();
+        assert_eq!(manager.output_cursor("s"), expected);
         manager.shutdown(&db);
     }
 
