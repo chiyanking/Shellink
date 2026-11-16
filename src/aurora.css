@@ -273,10 +273,6 @@
 .connection-stat.tone-purple svg { color: var(--purple); }
 .connection-stat.tone-cyan svg { color: var(--cyan); }
 .connections-toolbar { margin-bottom: 18px; gap: 12px; }
-.filter-tabs { gap: 6px; border: 0; background: transparent; }
-.filter-tabs > button { display: inline-flex; align-items: center; gap: 7px; min-height: 26px; padding: 4px 11px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--muted-foreground); font-size: 11px; }
-.filter-tabs > button.is-active { background: var(--gradient-soft); border-color: transparent; color: var(--primary-text); box-shadow: none; }
-.filter-tabs > button > span { background: transparent; font: 9px var(--font-mono); padding: 0; color: inherit; }
 .connections-group-filter { display: flex; min-width: 0; }
 .group-filter-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--primary-soft); color: var(--primary-text); font-size: 11px; overflow-wrap: anywhere; }
 .search-input { background: var(--surface); border-radius: 8px; }

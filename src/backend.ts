@@ -22,9 +22,5 @@ export function openDirectory(path: string): Promise<void> {
   return invoke<void>('open_data_directory', { path })
 }
 export function errorText(error: unknown) { return error instanceof Error ? error.message : String(error) }
-export function downloadJSON(name: string, data: unknown) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
 export function preference<T>(key: string, fallback: T): T { try { return JSON.parse(localStorage.getItem(`shellink.${key}`) ?? 'null') ?? fallback } catch { return fallback } }
 export function savePreference(key: string, value: unknown) { localStorage.setItem(`shellink.${key}`, JSON.stringify(value)) }

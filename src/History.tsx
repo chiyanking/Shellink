@@ -1,18 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownToLine, ArrowUpRight, FileClock, Search } from 'lucide-react'
+import { ArrowDownToLine, FileClock, Search } from 'lucide-react'
 import { rpc, type HistoryChunk } from './backend'
 import { useDesign } from './context'
 import { Badge, Button, Input } from './components/ui'
 import { PageHeading } from './Workspace'
 
 type ChunkPage = { items: HistoryChunk[]; cursor: number; hasMore: boolean }
-
-export function SessionHistoryPreview({ sessionId }: { sessionId: string }) {
-  const { inspectHistory } = useDesign()
-  const [items, setItems] = useState<HistoryChunk[]>([])
-  useEffect(() => { let alive = true; void rpc<ChunkPage>('sessions.historyChunks', {id:sessionId,since:0,limit:40}).then(page => {if(alive)setItems(page.items.slice(-4).reverse())}).catch(() => {}); return () => {alive=false} }, [sessionId])
-  return <div className="session-history-preview"><p className="review-caption">终端流不包含操作者身份或退出码。</p>{items.map(item => <div className="session-history-item" key={item.id}><div className="activity-content"><span className="session-history-meta"><strong>来源未知 · {item.direction}</strong><time>{new Date(item.createdAt).toLocaleTimeString()}</time></span><pre>{item.plain}</pre></div></div>)}{!items.length && <p className="review-caption">暂无历史片段。</p>}<Button variant="outline" className="session-history-open" onClick={() => inspectHistory(sessionId)}><FileClock size={13}/>查看全部终端历史<ArrowUpRight size={12}/></Button></div>
-}
 
 export default function HistoryPage() {
   const { sessions, connections, historyScope, inspectSession, notify } = useDesign()
