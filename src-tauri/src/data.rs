@@ -403,6 +403,109 @@ impl DataStore {
         let text: String = reversed.into_iter().rev().collect();
         Ok(json!({"text":text,"hasEarlier":has_earlier}))
     }
+    /// Latest `limit` lines of plain terminal output, plus the end-of-output read
+    /// position `(lastSeq, lastChar)` for the per-session consuming cursor.
+    pub fn read_output_latest(&self, id: &str, limit: usize) -> Result<Value, String> {
+        if !(1..=10_000).contains(&limit) {
+            return Err("invalid output line limit".into());
+        }
+        let c = self.conn.lock().unwrap();
+        let exists: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            return Err("Session not found".into());
+        }
+        let mut statement = c.prepare(
+            "SELECT seq, data_plain FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 ORDER BY seq DESC",
+        ).map_err(|e| e.to_string())?;
+        let mut rows = statement.query([id]).map_err(|e| e.to_string())?;
+        let mut reversed = Vec::new();
+        let mut remaining = limit;
+        let mut end = (0i64, 0usize);
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let seq: i64 = row.get(0).map_err(|e| e.to_string())?;
+            let chunk: String = row.get(1).map_err(|e| e.to_string())?;
+            if end.0 == 0 {
+                end = (seq, chunk.chars().count());
+            }
+            for ch in chunk.chars().rev() {
+                // A trailing newline terminates the final line without adding an empty one.
+                if ch == '\n' && !reversed.is_empty() {
+                    remaining -= 1;
+                    if remaining == 0 {
+                        break;
+                    }
+                }
+                reversed.push(ch);
+            }
+            if remaining == 0 {
+                break;
+            }
+        }
+        let text: String = reversed.into_iter().rev().collect();
+        Ok(json!({"text":text,"lastSeq":end.0,"lastChar":end.1}))
+    }
+    /// Plain output produced after the read position `(after_seq, after_char)`, in
+    /// chronological order, capped at `cap` newline-terminated lines per call. The
+    /// position advances only past the returned text, so a capped call leaves the
+    /// remaining backlog for the next call. Returns the new position.
+    pub fn read_output_after(
+        &self,
+        id: &str,
+        after_seq: i64,
+        after_char: usize,
+        cap: usize,
+    ) -> Result<Value, String> {
+        if !(1..=10_000).contains(&cap) {
+            return Err("invalid output line cap".into());
+        }
+        let c = self.conn.lock().unwrap();
+        let exists: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)",
+                [id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !exists {
+            return Err("Session not found".into());
+        }
+        let mut statement = c.prepare(
+            "SELECT seq, data_plain FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 AND seq>=? ORDER BY seq ASC",
+        ).map_err(|e| e.to_string())?;
+        let mut rows = statement.query(rusqlite::params![id, after_seq]).map_err(|e| e.to_string())?;
+        let mut text = String::new();
+        let mut lines = 0usize;
+        let mut end = (after_seq, after_char);
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let seq: i64 = row.get(0).map_err(|e| e.to_string())?;
+            let chunk: String = row.get(1).map_err(|e| e.to_string())?;
+            let chars: Vec<char> = chunk.chars().collect();
+            // Chars before `after_char` in the position chunk were already returned.
+            let start = if seq == after_seq { after_char.min(chars.len()) } else { 0 };
+            let mut consumed = start;
+            for ch in &chars[start..] {
+                text.push(*ch);
+                consumed += 1;
+                if *ch == '\n' {
+                    lines += 1;
+                    if lines >= cap {
+                        break;
+                    }
+                }
+            }
+            end = (seq, consumed);
+            if lines >= cap {
+                break;
+            }
+        }
+        Ok(json!({"text":text,"lastSeq":end.0,"lastChar":end.1}))
+    }
     pub fn update_session_mode(&self, id: &str, mode: &str) -> Result<Value, String> {
         if mode != "AUTO" && mode != "MANUAL" {
             return Err("mode must be AUTO or MANUAL".into());

@@ -51,8 +51,8 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "out",
-        "Read the latest plain terminal logs in chronological order. limit is the number of recent text lines (default 200, max 10000), including an unfinished final line such as a shell prompt. Lines are joined across PTY chunks and are not cut by character count. Each call returns a fresh snapshot without consuming output or tracking a cursor, so readers do not affect each other. hasEarlier indicates omitted older lines. Reads return immediately; repeat to observe later output. active describes the session, not command completion. This is a log snapshot, not a rendered terminal screen.",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10000,"default":200}},"required":["id"]}"#,
+        "Read terminal output. Without limit, returns the output produced since the previous call, consuming a per-session read position: the first call returns the latest 200 lines as context, and a single call returns at most 10000 lines, so call again without limit to continue draining after a large backlog. With limit, returns the latest `limit` lines as a snapshot instead and moves the read position to the end. Empty text means no new output; repeat reads never re-send consumed output. active describes the session, not command completion. This is a log stream, not a rendered terminal screen.",
+        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10000}},"required":["id"]}"#,
     ),
     (
         "send",
@@ -323,7 +323,7 @@ fn process_request_with(
                     SUPPORTED_VERSIONS[0]
                 };
                 Ok(
-                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. out returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. send automatically adds a newline to submit commands unless text already ends with LF or CR; raw sends text verbatim without adding a newline. Success confirms input was sent, not command completion. SSH MFA must be completed in the Desktop dialog."}),
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. out without limit returns the output produced since the previous call (the first call returns the latest 200 lines); with limit it returns the latest limit lines and moves the read position to the end. Empty text means no new output; call again to fetch more. active describes the session, not command completion. send automatically adds a newline to submit commands unless text already ends with LF or CR; raw sends text verbatim without adding a newline. Success confirms input was sent, not command completion. SSH MFA must be completed in the Desktop dialog."}),
                 )
             }
             None => Err((-32602, "initialize requires protocolVersion".into())),
@@ -369,7 +369,7 @@ fn output_schema(name: &str) -> Value {
             json!({"id":{"type":"string"},"state":{"type":"string"},"mode":{"type":"string"},"active":{"type":"boolean"},"lastSeq":{"type":"integer"},"recentOutput":{"type":"string"},"exitCode":{"type":["integer","null"]}})
         }
         "out" => {
-            json!({"text":{"type":"string"},"hasEarlier":{"type":"boolean"},"active":{"type":"boolean"}})
+            json!({"text":{"type":"string"},"active":{"type":"boolean"}})
         }
         "send" | "raw" => json!({"ok":{"type":"boolean"}}),
         "mode" => json!({"ok":{"type":"boolean"},"mode":{"type":"string"}}),
@@ -515,11 +515,39 @@ fn call_tool_with(
 }
 
 fn read_output(db: &DataStore, manager: &SessionManager, args: &Value) -> Result<Value, String> {
+    const DRAIN_LINES: usize = 10_000;
     let id = args["id"].as_str().unwrap();
-    let state = manager.state(db, id)?;
-    let mut result = db.read_output(id, args["limit"].as_u64().unwrap_or(200) as usize)?;
-    result["active"] = state["active"].clone();
-    Ok(result)
+    let active = manager.state(db, id)?["active"].clone();
+    let position = |result: &Value| {
+        (
+            result["lastSeq"].as_i64().unwrap_or_default(),
+            result["lastChar"].as_u64().unwrap_or_default() as usize,
+        )
+    };
+    let text = match args["limit"].as_u64() {
+        // A limit turns the read into a snapshot of the latest lines and moves the
+        // position to the end, so the next unlimited read continues from there.
+        Some(limit) => {
+            let snapshot = db.read_output_latest(id, limit as usize)?;
+            manager.set_output_cursor(id, position(&snapshot));
+            snapshot["text"].clone()
+        }
+        None => match manager.output_cursor(id) {
+            // First read of a session: prime the position with a context snapshot.
+            None => {
+                let snapshot = db.read_output_latest(id, 200)?;
+                manager.set_output_cursor(id, position(&snapshot));
+                snapshot["text"].clone()
+            }
+            // Drain the output produced since the previous read.
+            Some((seq, chars)) => {
+                let drained = db.read_output_after(id, seq, chars, DRAIN_LINES)?;
+                manager.set_output_cursor(id, position(&drained));
+                drained["text"].clone()
+            }
+        },
+    };
+    Ok(json!({"text":text,"active":active}))
 }
 
 fn tool_success(value: Value) -> Value {
@@ -557,7 +585,6 @@ mod tests {
             .find(|tool| tool["name"] == "out")
             .unwrap();
         assert_eq!(read["annotations"]["readOnlyHint"], true);
-        assert_eq!(read["inputSchema"]["properties"]["limit"]["default"], 200);
         assert_eq!(
             read["inputSchema"]["properties"].as_object().unwrap().len(),
             2
@@ -621,31 +648,63 @@ mod tests {
     }
 
     #[test]
-    fn output_reads_return_independent_recent_snapshots() {
+    fn output_reads_consume_from_a_per_session_cursor() {
         let db = DataStore::test_store(PathBuf::new());
         let manager = SessionManager::new();
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
             .unwrap();
+        // The first unlimited read primes the position with a context snapshot.
+        db.add_output("s", "first\n").unwrap();
+        let primed = invoke(&db, &manager, "out", json!({"id":"s"}));
+        assert_eq!(
+            primed["structuredContent"],
+            json!({"text":"first\n","active":true})
+        );
+        // Later reads return only the output produced since the previous read.
+        db.add_output("s", "latest\n").unwrap();
+        let next = invoke(&db, &manager, "out", json!({"id":"s"}));
+        assert_eq!(
+            next["structuredContent"],
+            json!({"text":"latest\n","active":true})
+        );
         let empty = invoke(&db, &manager, "out", json!({"id":"s"}));
         assert_eq!(
             empty["structuredContent"],
-            json!({"text":"","hasEarlier":false,"active":true})
+            json!({"text":"","active":true})
         );
-        db.add_output("s", "first\n").unwrap();
-        db.add_output("s", "latest\n").unwrap();
-        for _ in 0..2 {
-            let result = invoke(&db, &manager, "out", json!({"id":"s","limit":1}));
-            assert_eq!(
-                result["structuredContent"],
-                json!({"text":"latest\n","hasEarlier":true,"active":true})
-            );
-        }
+        // A limit reads the latest lines as a snapshot and moves the position to
+        // the end, so nothing already shown is returned again.
+        db.add_output("s", "a\nb\nc\n").unwrap();
+        let peek = invoke(&db, &manager, "out", json!({"id":"s","limit":2}));
+        assert_eq!(
+            peek["structuredContent"],
+            json!({"text":"b\nc\n","active":true})
+        );
+        let after_peek = invoke(&db, &manager, "out", json!({"id":"s"}));
+        assert_eq!(
+            after_peek["structuredContent"],
+            json!({"text":"","active":true})
+        );
+        // A backlog larger than the drain cap is returned in batches.
+        let backlog: String = (0..10_001).map(|i| format!("line{i}\n")).collect();
+        db.add_output("s", &backlog).unwrap();
+        let batch = invoke(&db, &manager, "out", json!({"id":"s"}));
+        let text = batch["structuredContent"]["text"].as_str().unwrap();
+        assert_eq!(text.lines().count(), 10_000);
+        assert!(text.starts_with("line0\n"));
+        assert!(text.ends_with("line9999\n"));
+        let rest = invoke(&db, &manager, "out", json!({"id":"s"}));
+        assert_eq!(
+            rest["structuredContent"]["text"],
+            json!("line10000\n")
+        );
+        // Disconnected sessions keep reporting their own liveness.
         db.update_session_state("s", "DISCONNECTED", Some("test"))
             .unwrap();
         let closed = invoke(&db, &manager, "out", json!({"id":"s"}));
         assert_eq!(
             closed["structuredContent"],
-            json!({"text":"first\nlatest\n","hasEarlier":false,"active":false})
+            json!({"text":"","active":false})
         );
         let cancelled = call_tool_with(
             &db,

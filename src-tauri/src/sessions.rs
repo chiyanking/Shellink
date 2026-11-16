@@ -37,6 +37,9 @@ struct SpawnedSession {
 
 pub struct SessionManager {
     live: Mutex<HashMap<String, Live>>,
+    // Per-session `(seq, char_offset)` read position for the MCP `out` tool.
+    // Kept in memory only: a Desktop restart re-primes it from the latest output.
+    output_cursor: Mutex<HashMap<String, (i64, usize)>>,
     next_id: AtomicU64,
     stopping: AtomicBool,
     reaper: Mutex<Option<thread::JoinHandle<()>>>,
@@ -46,10 +49,22 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             live: Mutex::new(HashMap::new()),
+            output_cursor: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             stopping: AtomicBool::new(false),
             reaper: Mutex::new(None),
         }
+    }
+
+    pub fn output_cursor(&self, id: &str) -> Option<(i64, usize)> {
+        self.output_cursor.lock().unwrap().get(id).cloned()
+    }
+
+    pub fn set_output_cursor(&self, id: &str, position: (i64, usize)) {
+        self.output_cursor
+            .lock()
+            .unwrap()
+            .insert(id.to_owned(), position);
     }
 
     pub fn start_reaper(self: &Arc<Self>, app: AppHandle) {
@@ -307,6 +322,7 @@ impl SessionManager {
             cleanup_key(session.key_path.take());
         }
         drop(live);
+        self.output_cursor.lock().unwrap().remove(id);
         db.update_session_state(id, "DISCONNECTED", Some("Closed by user"))?;
         Ok(json!({"closed":true}))
     }

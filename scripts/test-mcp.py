@@ -99,11 +99,14 @@ def exercise(http_enabled):
                     return snapshot if "MCP_RAW_OK" in snapshot["text"] else None
 
                 latest = wait_until(marker_output)
-                assert set(latest) == {"text", "hasEarlier", "active"}, latest
-                assert "MCP_RAW_OK" in tool("out", id=session)["structuredContent"]["text"]
+                assert set(latest) == {"text", "active"}, latest
+                # A limited read is a repeatable snapshot of the latest lines.
+                assert "MCP_RAW_OK" in tool("out", id=session, limit=200)["structuredContent"]["text"]
                 tail = tool("out", id=session, limit=1)["structuredContent"]
-                assert len(tail["text"].splitlines()) <= 1 and tail["hasEarlier"] is True, tail
-                assert "MCP_RAW_OK" in tool("out", id=session)["structuredContent"]["text"]
+                assert len(tail["text"].splitlines()) <= 1, tail
+                assert "MCP_RAW_OK" in tool("out", id=session, limit=100)["structuredContent"]["text"]
+                # An unlimited read consumes: it must not re-send the peeked output.
+                assert "MCP_RAW_OK" not in tool("out", id=session)["structuredContent"]["text"]
                 # A command without a trailing newline is submitted by default.
                 auto_command = r"printf '\115\103\120\137\101\125\124\117\137\117\113\n'"
                 assert tool("send", id=session, text=auto_command)["isError"] is False
@@ -147,9 +150,9 @@ def exercise(http_enabled):
 
                 if http_enabled:
                     assert request_http()[0] == 200
-                    status, payload = request_http(rpc_request={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "out", "arguments": {"id": session}}})
+                    status, payload = request_http(rpc_request={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "out", "arguments": {"id": session, "limit": 50}}})
                     assert status == 200
-                    assert json.loads(payload)["result"]["structuredContent"] == tool("out", id=session)["structuredContent"]
+                    assert json.loads(payload)["result"]["structuredContent"] == tool("out", id=session, limit=50)["structuredContent"]
                     assert request_http("GET")[0] == 405
                     assert request_http(extra={"Origin": "http://evil.invalid"})[0] == 403
                     assert request_http(extra={"MCP-Protocol-Version": "invalid"})[0] == 400
