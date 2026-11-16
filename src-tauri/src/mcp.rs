@@ -51,8 +51,8 @@ const MCP_TOOLS: &[(&str, &str, &str)] = &[
     ),
     (
         "out",
-        "Read terminal output. Without limit, returns the output produced since the previous call, consuming a per-session read position: the first call returns the latest 200 lines as context, and a single call returns at most 10000 lines, so call again without limit to continue draining after a large backlog. With limit, returns the latest `limit` lines as a snapshot instead and moves the read position to the end. Empty text means no new output; repeat reads never re-send consumed output. active describes the session, not command completion. This is a log stream, not a rendered terminal screen.",
-        r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10000}},"required":["id"]}"#,
+        "Read the terminal output produced since the previous call. Empty text means no new output. Use state for a stateless latest-output snapshot.",
+        r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
     ),
     (
         "send",
@@ -323,7 +323,7 @@ fn process_request_with(
                     SUPPORTED_VERSIONS[0]
                 };
                 Ok(
-                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. out without limit returns the output produced since the previous call (the first call returns the latest 200 lines); with limit it returns the latest limit lines and moves the read position to the end. Empty text means no new output; call again to fetch more. active describes the session, not command completion. send automatically adds a newline to submit commands unless text already ends with LF or CR; raw sends text verbatim without adding a newline. Success confirms input was sent, not command completion. SSH MFA must be completed in the Desktop dialog."}),
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"out returns terminal output since the previous call; empty text means no new output. state returns a latest-output snapshot. send submits a command to an AUTO session and adds a newline unless text ends with LF or CR; raw sends text verbatim. A send success means input was sent, not that the command finished. SSH MFA must be completed in the Desktop dialog."}),
                 )
             }
             None => Err((-32602, "initialize requires protocolVersion".into())),
@@ -515,7 +515,6 @@ fn call_tool_with(
 }
 
 fn read_output(db: &DataStore, manager: &SessionManager, args: &Value) -> Result<Value, String> {
-    const DRAIN_LINES: usize = 10_000;
     let id = args["id"].as_str().unwrap();
     let active = manager.state(db, id)?["active"].clone();
     let position = |result: &Value| {
@@ -524,28 +523,19 @@ fn read_output(db: &DataStore, manager: &SessionManager, args: &Value) -> Result
             result["lastChar"].as_u64().unwrap_or_default() as usize,
         )
     };
-    let text = match args["limit"].as_u64() {
-        // A limit turns the read into a snapshot of the latest lines and moves the
-        // position to the end, so the next unlimited read continues from there.
-        Some(limit) => {
-            let snapshot = db.read_output_latest(id, limit as usize)?;
+    let text = match manager.output_cursor(id) {
+        // First read of a session: prime the position with a context snapshot.
+        None => {
+            let snapshot = db.read_output_latest(id, 200)?;
             manager.set_output_cursor(id, position(&snapshot));
             snapshot["text"].clone()
         }
-        None => match manager.output_cursor(id) {
-            // First read of a session: prime the position with a context snapshot.
-            None => {
-                let snapshot = db.read_output_latest(id, 200)?;
-                manager.set_output_cursor(id, position(&snapshot));
-                snapshot["text"].clone()
-            }
-            // Drain the output produced since the previous read.
-            Some((seq, chars)) => {
-                let drained = db.read_output_after(id, seq, chars, DRAIN_LINES)?;
-                manager.set_output_cursor(id, position(&drained));
-                drained["text"].clone()
-            }
-        },
+        // Drain the output produced since the previous read.
+        Some((seq, chars)) => {
+            let drained = db.read_output_after(id, seq, chars)?;
+            manager.set_output_cursor(id, position(&drained));
+            drained["text"].clone()
+        }
     };
     Ok(json!({"text":text,"active":active}))
 }
@@ -587,7 +577,7 @@ mod tests {
         assert_eq!(read["annotations"]["readOnlyHint"], true);
         assert_eq!(
             read["inputSchema"]["properties"].as_object().unwrap().len(),
-            2
+            1
         );
         assert_eq!(read["inputSchema"]["required"], json!(["id"]));
         assert_eq!(read["outputSchema"]["type"], "object");
@@ -632,6 +622,7 @@ mod tests {
         }
         for args in [
             json!({"id":"s","limit":"200"}),
+            json!({"id":"s","limit":50}),
             json!({"id":"s","maxChars":16000}),
         ] {
             let invalid = invoke(&db, &manager, "out", args);
@@ -653,7 +644,7 @@ mod tests {
         let manager = SessionManager::new();
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
             .unwrap();
-        // The first unlimited read primes the position with a context snapshot.
+        // The first read primes the position with a context snapshot.
         db.add_output("s", "first\n").unwrap();
         let primed = invoke(&db, &manager, "out", json!({"id":"s"}));
         assert_eq!(
@@ -670,19 +661,6 @@ mod tests {
         let empty = invoke(&db, &manager, "out", json!({"id":"s"}));
         assert_eq!(
             empty["structuredContent"],
-            json!({"text":"","active":true})
-        );
-        // A limit reads the latest lines as a snapshot and moves the position to
-        // the end, so nothing already shown is returned again.
-        db.add_output("s", "a\nb\nc\n").unwrap();
-        let peek = invoke(&db, &manager, "out", json!({"id":"s","limit":2}));
-        assert_eq!(
-            peek["structuredContent"],
-            json!({"text":"b\nc\n","active":true})
-        );
-        let after_peek = invoke(&db, &manager, "out", json!({"id":"s"}));
-        assert_eq!(
-            after_peek["structuredContent"],
             json!({"text":"","active":true})
         );
         // A backlog larger than the drain cap is returned in batches.

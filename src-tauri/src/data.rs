@@ -204,9 +204,9 @@ impl DataStore {
             .map_err(|e| e.to_string())?;
         // Pure control sequences (title changes, cursor moves, screen clears)
         // carry no readable text. Keep their raw bytes for replay/events but
-        // hide them from history and read_output, which filter on internal=0.
-        // Only chunks with no text at all are hidden; a chunk made of newlines
-        // is real output and must stay visible to read_output.
+        // hide them from history and the output readers, which filter on
+        // internal=0. Only chunks with no text at all are hidden; a chunk made
+        // of newlines is real output and must stay visible to them.
         let internal = plain.is_empty();
         c.execute("INSERT INTO history_chunks (session_id,seq,direction,data_raw,data_plain,internal,created_at) VALUES (?,?,?,?,?,?,?)", rusqlite::params![id,seq,"output",text,plain,internal,now()]).map_err(|e|e.to_string())?;
         c.execute(
@@ -360,49 +360,6 @@ impl DataStore {
         }
         Ok(json!({"items":items,"cursor":cursor,"hasMore":items.len() as i64==limit}))
     }
-    /// Return the latest lines, including an unfinished final line such as a prompt.
-    pub fn read_output(&self, id: &str, limit: usize) -> Result<Value, String> {
-        if !(1..=10_000).contains(&limit) {
-            return Err("invalid output line limit".into());
-        }
-        let c = self.conn.lock().unwrap();
-        let exists: bool = c
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?)",
-                [id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if !exists {
-            return Err("Session not found".into());
-        }
-        let mut statement = c.prepare(
-            "SELECT data_plain FROM history_chunks WHERE session_id=? AND direction='output' AND internal=0 ORDER BY seq DESC",
-        ).map_err(|e| e.to_string())?;
-        let mut rows = statement.query([id]).map_err(|e| e.to_string())?;
-        let mut reversed = Vec::new();
-        let mut remaining = limit;
-        let mut has_earlier = false;
-        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
-            let chunk: String = row.get(0).map_err(|e| e.to_string())?;
-            for ch in chunk.chars().rev() {
-                // A trailing newline terminates the final line without adding an empty one.
-                if ch == '\n' && !reversed.is_empty() {
-                    remaining -= 1;
-                    if remaining == 0 {
-                        has_earlier = true;
-                        break;
-                    }
-                }
-                reversed.push(ch);
-            }
-            if has_earlier {
-                break;
-            }
-        }
-        let text: String = reversed.into_iter().rev().collect();
-        Ok(json!({"text":text,"hasEarlier":has_earlier}))
-    }
     /// Latest `limit` lines of plain terminal output, plus the end-of-output read
     /// position `(lastSeq, lastChar)` for the per-session consuming cursor.
     pub fn read_output_latest(&self, id: &str, limit: usize) -> Result<Value, String> {
@@ -451,19 +408,16 @@ impl DataStore {
         Ok(json!({"text":text,"lastSeq":end.0,"lastChar":end.1}))
     }
     /// Plain output produced after the read position `(after_seq, after_char)`, in
-    /// chronological order, capped at `cap` newline-terminated lines per call. The
-    /// position advances only past the returned text, so a capped call leaves the
-    /// remaining backlog for the next call. Returns the new position.
+    /// chronological order, capped at `DRAIN_LINES` newline-terminated lines per
+    /// call. The position advances only past the returned text, so a capped call
+    /// leaves the remaining backlog for the next call. Returns the new position.
     pub fn read_output_after(
         &self,
         id: &str,
         after_seq: i64,
         after_char: usize,
-        cap: usize,
     ) -> Result<Value, String> {
-        if !(1..=10_000).contains(&cap) {
-            return Err("invalid output line cap".into());
-        }
+        const DRAIN_LINES: usize = 10_000;
         let c = self.conn.lock().unwrap();
         let exists: bool = c
             .query_row(
@@ -494,13 +448,13 @@ impl DataStore {
                 consumed += 1;
                 if *ch == '\n' {
                     lines += 1;
-                    if lines >= cap {
+                    if lines >= DRAIN_LINES {
                         break;
                     }
                 }
             }
             end = (seq, consumed);
-            if lines >= cap {
+            if lines >= DRAIN_LINES {
                 break;
             }
         }
@@ -1003,24 +957,16 @@ mod tests {
         db.add_output("s", "first\n").unwrap();
         db.add_input("s", "secret input").unwrap();
         db.add_output("s", "second\n第三行\n").unwrap();
+        assert_eq!(db.read_output_latest("s", 1).unwrap()["text"], "第三行\n");
         assert_eq!(
-            db.read_output("s", 1).unwrap(),
-            json!({"text":"第三行\n","hasEarlier":true})
+            db.read_output_latest("s", 2).unwrap()["text"],
+            "second\n第三行\n"
         );
-        assert_eq!(
-            db.read_output("s", 2).unwrap(),
-            json!({"text":"second\n第三行\n","hasEarlier":true})
-        );
-        assert_eq!(
-            db.read_output("s", 3).unwrap(),
-            json!({"text":"first\nsecond\n第三行\n","hasEarlier":false})
-        );
+        let full = db.read_output_latest("s", 3).unwrap();
+        assert_eq!(full["text"], "first\nsecond\n第三行\n");
         let long_line = format!("{}最新结果\n", "中".repeat(70_000));
         db.add_output("s", &long_line).unwrap();
-        assert_eq!(
-            db.read_output("s", 1).unwrap(),
-            json!({"text":long_line,"hasEarlier":true})
-        );
+        assert_eq!(db.read_output_latest("s", 1).unwrap()["text"], long_line);
     }
 
     #[test]
@@ -1040,16 +986,16 @@ mod tests {
             db.add_output("s", chunk).unwrap();
         }
         assert_eq!(
-            db.read_output("s", 1).unwrap(),
-            json!({"text":"prompt> ","hasEarlier":true})
+            db.read_output_latest("s", 1).unwrap()["text"],
+            "prompt> "
         );
         assert_eq!(
-            db.read_output("s", 2).unwrap(),
-            json!({"text":"第三行\r\nprompt> ","hasEarlier":true})
+            db.read_output_latest("s", 2).unwrap()["text"],
+            "第三行\r\nprompt> "
         );
         assert_eq!(
-            db.read_output("s", 4).unwrap(),
-            json!({"text":"first\r\nsecond\r\n第三行\r\nprompt> ","hasEarlier":false})
+            db.read_output_latest("s", 4).unwrap()["text"],
+            "first\r\nsecond\r\n第三行\r\nprompt> "
         );
     }
 
@@ -1059,20 +1005,14 @@ mod tests {
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
             .unwrap();
         db.add_output("s", "\n\n").unwrap();
-        assert_eq!(
-            db.read_output("s", 1).unwrap(),
-            json!({"text":"\n","hasEarlier":true})
-        );
-        assert_eq!(
-            db.read_output("s", 2).unwrap(),
-            json!({"text":"\n\n","hasEarlier":false})
-        );
+        assert_eq!(db.read_output_latest("s", 1).unwrap()["text"], "\n");
+        assert_eq!(db.read_output_latest("s", 2).unwrap()["text"], "\n\n");
         for _ in 0..500 {
             db.add_output("s", "中").unwrap();
         }
         assert_eq!(
-            db.read_output("s", 1).unwrap(),
-            json!({"text":"中".repeat(500),"hasEarlier":true})
+            db.read_output_latest("s", 1).unwrap()["text"],
+            "中".repeat(500)
         );
     }
 
@@ -1094,17 +1034,17 @@ mod tests {
                 rusqlite::params!["s", internal_seq],
             )
             .unwrap();
-        let first_reader = db.read_output("s", 100).unwrap();
-        let second_reader = db.read_output("s", 100).unwrap();
-        assert_eq!(first_reader, json!({"text":"visible","hasEarlier":false}));
+        let first_reader = db.read_output_latest("s", 100).unwrap();
+        let second_reader = db.read_output_latest("s", 100).unwrap();
+        assert_eq!(first_reader["text"], "visible");
         assert_eq!(second_reader, first_reader);
         assert_eq!(
-            db.read_output("empty", 100).unwrap(),
-            json!({"text":"","hasEarlier":false})
+            db.read_output_latest("empty", 100).unwrap()["text"],
+            ""
         );
-        assert!(db.read_output("missing", 100).is_err());
+        assert!(db.read_output_latest("missing", 100).is_err());
         for limit in [0, 10_001] {
-            assert!(db.read_output("s", limit).is_err());
+            assert!(db.read_output_latest("s", limit).is_err());
         }
     }
 
@@ -1121,7 +1061,7 @@ mod tests {
         let items = chunks["items"].as_array().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["plain"], "visible\n");
-        assert_eq!(db.read_output("s", 100).unwrap()["text"], "visible\n");
+        assert_eq!(db.read_output_latest("s", 100).unwrap()["text"], "visible\n");
         // Raw bytes remain available for terminal replay.
         assert!(
             db.replay("s").unwrap()["raw"]

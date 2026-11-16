@@ -68,18 +68,15 @@ MCP tools return both JSON text content and `structuredContent`, with output sch
 
 `send` submits `text` to the PTY, automatically adding LF unless it already ends with LF or CR. AI clients can send a command without a trailing newline; empty text sends Enter. `raw` sends `text` verbatim for control keys or other input that must not submit a line; empty text sends nothing. Both tools take only `id` and `text`. Success confirms the input was sent; use `out` to observe the result. Input history stores the actual bytes sent, including any added newline. AUTO/MANUAL are collaboration modes: MANUAL rejects MCP input, and MCP can call `mode` to switch back to AUTO.
 
-`out` reads terminal output with a per-session read position held by the Desktop. Only the session `id` is required:
+`out` reads terminal output with a per-session read position held by the Desktop. Only the session `id` is accepted:
 
 ```json
 {"id":"session-id"}
 ```
 
-| Argument | Behavior |
-| --- | --- |
-| *(no `limit`)* | Returns the output produced since the previous read, in chronological order. The first read returns the latest 200 lines as context. A single read returns at most 10000 lines; call again to continue draining after a large backlog. |
-| `limit` | Returns the latest `limit` lines as a snapshot instead (newest lines, including an unfinished final line such as a shell prompt) and moves the read position to the end. |
+The read returns the output produced since the previous call, in chronological order. The first read returns the latest 200 lines as context. A single read returns at most 10000 lines; call again to continue draining after a large backlog.
 
-Responses include `text` and `active`; empty `text` means no new output. Reads consume: output already returned is never re-sent, so repeated unlimited reads return only new lines. Lines are separated by LF (preserving CRLF), joined across PTY chunks, and kept intact without a character limit. The read position lives in Desktop memory only; restarting the Desktop re-primes it from the latest output on the next read. Concurrent readers share one position per session, so a second reader misses output the first reader consumed — use `limit` snapshots to re-sync. `active` describes whether the session is alive, not whether an individual command has finished. List results use the `profiles` or `sessions` array in their structured object.
+Responses include `text` and `active`; empty `text` means no new output. Reads consume: output already returned is never re-sent, so repeated reads return only new lines. Lines are separated by LF (preserving CRLF), joined across PTY chunks, and kept intact without a character limit. The read position lives in Desktop memory only; restarting the Desktop re-primes it from the latest output on the next read. Concurrent readers share one position per session, so a second reader misses output the first reader consumed — use the `state` tool for a stateless snapshot of the latest output to re-sync. `active` describes whether the session is alive, not whether an individual command has finished. List results use the `profiles` or `sessions` array in their structured object.
 
 The ten MCP tools are `profiles`, `new`, `sessions`, `open`, `state`, `out`, `send`, `raw`, `mode`, and `close`. The Tauri RPC surface also exposes profile editing, session history and replay, Webhook messages, and lifecycle status. A background reaper updates exit status and exit codes independently of UI polling.
 
