@@ -174,37 +174,35 @@ fn validate_request(
     if !content_type.eq_ignore_ascii_case("application/json") {
         return Err((415, "Content-Type must be application/json".into()));
     }
-    if request.path == "/shellink/mcp" {
-        if let Some(version) = request.headers.get("mcp-protocol-version") {
-            if !SUPPORTED_VERSIONS.contains(&version.as_str())
-                || (!internal && version == "2024-11-05")
-            {
-                return Err((400, "unsupported MCP-Protocol-Version".into()));
-            }
+    if let Some(version) = request.headers.get("mcp-protocol-version") {
+        if !SUPPORTED_VERSIONS.contains(&version.as_str())
+            || (!internal && version == "2024-11-05")
+        {
+            return Err((400, "unsupported MCP-Protocol-Version".into()));
         }
-        let accept = request
-            .headers
-            .get("accept")
-            .map(String::as_str)
-            .unwrap_or_default();
-        let accepts_json = accept.split(',').any(|part| {
-            matches!(
-                part.trim().split(';').next(),
-                Some("application/json" | "*/*")
-            )
-        });
-        let accepts_sse = accept.split(',').any(|part| {
-            matches!(
-                part.trim().split(';').next(),
-                Some("text/event-stream" | "*/*")
-            )
-        });
-        if !accepts_json || !accepts_sse {
-            return Err((
-                406,
-                "Accept must include application/json and text/event-stream".into(),
-            ));
-        }
+    }
+    let accept = request
+        .headers
+        .get("accept")
+        .map(String::as_str)
+        .unwrap_or_default();
+    let accepts_json = accept.split(',').any(|part| {
+        matches!(
+            part.trim().split(';').next(),
+            Some("application/json" | "*/*")
+        )
+    });
+    let accepts_sse = accept.split(',').any(|part| {
+        matches!(
+            part.trim().split(';').next(),
+            Some("text/event-stream" | "*/*")
+        )
+    });
+    if !accepts_json || !accepts_sse {
+        return Err((
+            406,
+            "Accept must include application/json and text/event-stream".into(),
+        ));
     }
     Ok(())
 }
@@ -387,9 +385,18 @@ fn respond_json_rpc_error(
 
 fn respond_json(stream: &mut TcpStream, status: u16, value: Value) {
     let body = value.to_string();
-    let reason = match status {
+    let allow = if status == 405 { "Allow: POST\r\n" } else { "" };
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\n{allow}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        reason(status),
+        body.len()
+    );
+}
+
+fn reason(status: u16) -> &'static str {
+    match status {
         200 => "OK",
-        202 => "Accepted",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
@@ -397,19 +404,15 @@ fn respond_json(stream: &mut TcpStream, status: u16, value: Value) {
         405 => "Method Not Allowed",
         406 => "Not Acceptable",
         408 => "Request Timeout",
+        409 => "Conflict",
         411 => "Length Required",
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
         431 => "Request Header Fields Too Large",
+        500 => "Internal Server Error",
         503 => "Service Unavailable",
         _ => "Error",
-    };
-    let allow = if status == 405 { "Allow: POST\r\n" } else { "" };
-    let _ = write!(
-        stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n{allow}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
+    }
 }
 
 #[cfg(test)]

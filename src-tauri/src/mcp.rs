@@ -25,52 +25,52 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MCP_TOOLS: &[(&str, &str, &str)] = &[
     (
-        "list_profiles",
+        "profiles",
         "List all configured shellink connection profiles (SSH or command).",
         r#"{"type":"object","properties":{}}"#,
     ),
     (
-        "create_profile",
+        "new",
         "Create a shellink connection profile. SSH profiles use host, port, username and authentication fields.",
         r#"{"type":"object","properties":{"name":{"type":"string","description":"Profile display name"},"connectType":{"type":"string","enum":["ssh","command"]},"host":{"type":"string"},"port":{"type":"integer","minimum":1,"maximum":65535},"username":{"type":"string"},"authType":{"type":"string","enum":["password","password-mfa","key","keyboard-interactive"]},"password":{"type":"string","description":"Plaintext password (encrypted by shellink)"},"privateKey":{"type":"string","description":"Private key (encrypted by shellink)"},"passphrase":{"type":"string"},"command":{"type":"string","description":"Command for connectType=command"},"term":{"type":"string"}},"required":["name","connectType"]}"#,
     ),
     (
-        "list_sessions",
+        "sessions",
         "List all shellink sessions (active and historical).",
         r#"{"type":"object","properties":{}}"#,
     ),
     (
-        "create_session",
+        "open",
         "Open a new session for a profile and start connecting.",
         r#"{"type":"object","properties":{"profileId":{"type":"string","description":"ID of the profile to connect with"}},"required":["profileId"]}"#,
     ),
     (
-        "session_state",
+        "state",
         "Get the current state, mode and recent output of a session.",
         r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
     ),
     (
-        "read_output",
+        "out",
         "Read the latest plain terminal logs in chronological order. limit is the number of recent text lines (default 200, max 10000), including an unfinished final line such as a shell prompt. Lines are joined across PTY chunks and are not cut by character count. Each call returns a fresh snapshot without consuming output or tracking a cursor, so readers do not affect each other. hasEarlier indicates omitted older lines. Reads return immediately; repeat to observe later output. active describes the session, not command completion. This is a log snapshot, not a rendered terminal screen.",
         r#"{"type":"object","properties":{"id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10000,"default":200}},"required":["id"]}"#,
     ),
     (
-        "send_input",
-        "Submit a command to an AUTO session, adding a newline if needed. Use read_output to observe the result.",
+        "send",
+        "Submit a command to an AUTO session, adding a newline if needed. Use out to observe the result.",
         r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144}},"required":["id","text"]}"#,
     ),
     (
-        "send_raw_input",
-        "Send text verbatim to an AUTO session without adding a newline, for control keys and interactive input. Use read_output to observe the result.",
+        "raw",
+        "Send text verbatim to an AUTO session without adding a newline, for control keys and interactive input. Use out to observe the result.",
         r#"{"type":"object","properties":{"id":{"type":"string"},"text":{"type":"string","maxLength":262144}},"required":["id","text"]}"#,
     ),
     (
-        "set_mode",
+        "mode",
         "Switch a session between AUTO (MCP input allowed) and MANUAL (human typing only). MCP may switch back to AUTO to resume work; this is a collaboration mode, not an authorization boundary.",
         r#"{"type":"object","properties":{"id":{"type":"string"},"mode":{"type":"string","enum":["AUTO","MANUAL"]}},"required":["id","mode"]}"#,
     ),
     (
-        "close_session",
+        "close",
         "Close/terminate a session.",
         r#"{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}"#,
     ),
@@ -323,7 +323,7 @@ fn process_request_with(
                     SUPPORTED_VERSIONS[0]
                 };
                 Ok(
-                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. read_output returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. send_input automatically adds a newline to submit commands unless text already ends with LF or CR; send_raw_input sends text verbatim without adding a newline. Success confirms input was sent, not command completion. SSH MFA must be completed in the Desktop dialog."}),
+                    json!({"protocolVersion":version,"serverInfo":{"name":"shellink","version":env!("CARGO_PKG_VERSION")},"capabilities":{"tools":{}},"instructions":"Use profiles to open or reuse terminal sessions. AUTO/MANUAL are switchable collaboration modes. out returns the latest 200 text lines on every call; only id is required, and no cursor is needed. Increase limit for more lines. Repeat reads to observe later output; active describes the session, not command completion. send automatically adds a newline to submit commands unless text already ends with LF or CR; raw sends text verbatim without adding a newline. Success confirms input was sent, not command completion. SSH MFA must be completed in the Desktop dialog."}),
                 )
             }
             None => Err((-32602, "initialize requires protocolVersion".into())),
@@ -352,28 +352,28 @@ fn input_schema(schema: &str) -> Value {
 
 fn tools() -> Vec<Value> {
     MCP_TOOLS.iter().map(|(name, description, schema)| {
-        let read_only = matches!(*name, "list_profiles" | "list_sessions" | "session_state" | "read_output");
-        json!({"name":name,"description":description,"inputSchema":input_schema(schema),"outputSchema":output_schema(name),"annotations":{"readOnlyHint":read_only,"destructiveHint":!read_only,"idempotentHint":read_only || matches!(*name,"set_mode"|"close_session"),"openWorldHint":true}})
+        let read_only = matches!(*name, "profiles" | "sessions" | "state" | "out");
+        json!({"name":name,"description":description,"inputSchema":input_schema(schema),"outputSchema":output_schema(name),"annotations":{"readOnlyHint":read_only,"destructiveHint":!read_only,"idempotentHint":read_only || matches!(*name,"mode"|"close"),"openWorldHint":true}})
     }).collect()
 }
 
 fn output_schema(name: &str) -> Value {
     let properties = match name {
-        "list_profiles" => json!({"profiles":{"type":"array","items":{"type":"object"}}}),
-        "list_sessions" => json!({"sessions":{"type":"array","items":{"type":"object"}}}),
-        "create_profile" => json!({"id":{"type":"string"},"name":{"type":"string"}}),
-        "create_session" => {
+        "profiles" => json!({"profiles":{"type":"array","items":{"type":"object"}}}),
+        "sessions" => json!({"sessions":{"type":"array","items":{"type":"object"}}}),
+        "new" => json!({"id":{"type":"string"},"name":{"type":"string"}}),
+        "open" => {
             json!({"id":{"type":"string"},"state":{"type":"string"},"mode":{"type":"string"},"target":{"type":"string"}})
         }
-        "session_state" => {
+        "state" => {
             json!({"id":{"type":"string"},"state":{"type":"string"},"mode":{"type":"string"},"active":{"type":"boolean"},"lastSeq":{"type":"integer"},"recentOutput":{"type":"string"},"exitCode":{"type":["integer","null"]}})
         }
-        "read_output" => {
+        "out" => {
             json!({"text":{"type":"string"},"hasEarlier":{"type":"boolean"},"active":{"type":"boolean"}})
         }
-        "send_input" | "send_raw_input" => json!({"ok":{"type":"boolean"}}),
-        "set_mode" => json!({"ok":{"type":"boolean"},"mode":{"type":"string"}}),
-        "close_session" => json!({"closed":{"type":"boolean"}}),
+        "send" | "raw" => json!({"ok":{"type":"boolean"}}),
+        "mode" => json!({"ok":{"type":"boolean"},"mode":{"type":"string"}}),
+        "close" => json!({"closed":{"type":"boolean"}}),
         _ => unreachable!(),
     };
     let required: Vec<_> = properties.as_object().unwrap().keys().cloned().collect();
@@ -463,10 +463,10 @@ fn call_tool_with(
     }
     let id = args["id"].as_str().unwrap_or_default();
     let result = match name {
-        "list_profiles" => db
+        "profiles" => db
             .profiles(None)
             .map(|profiles| json!({"profiles":profiles})),
-        "create_profile" => {
+        "new" => {
             let required = if args["connectType"] == "command" {
                 &["command"][..]
             } else {
@@ -486,16 +486,16 @@ fn call_tool_with(
             }
             db.profile_create(&args)
         }
-        "list_sessions" => manager
+        "sessions" => manager
             .list(db)
             .map(|sessions| json!({"sessions":sessions})),
-        "create_session" => create(args["profileId"].as_str().unwrap()),
-        "session_state" => manager.state(db, id),
-        "read_output" => read_output(db, manager, &args),
-        "send_input" => manager.input_api(db, id, args["text"].as_str().unwrap()),
-        "send_raw_input" => manager.input_raw_api(db, id, args["text"].as_str().unwrap()),
-        "set_mode" => manager.set_mode(db, id, args["mode"].as_str().unwrap()),
-        "close_session" => manager.close(db, id),
+        "open" => create(args["profileId"].as_str().unwrap()),
+        "state" => manager.state(db, id),
+        "out" => read_output(db, manager, &args),
+        "send" => manager.input_api(db, id, args["text"].as_str().unwrap()),
+        "raw" => manager.input_raw_api(db, id, args["text"].as_str().unwrap()),
+        "mode" => manager.set_mode(db, id, args["mode"].as_str().unwrap()),
+        "close" => manager.close(db, id),
         _ => unreachable!(),
     };
     Ok(match result {
@@ -554,7 +554,7 @@ mod tests {
         assert!(!schemas.iter().any(|tool| tool["name"] == "screen"));
         let read = schemas
             .iter()
-            .find(|tool| tool["name"] == "read_output")
+            .find(|tool| tool["name"] == "out")
             .unwrap();
         assert_eq!(read["annotations"]["readOnlyHint"], true);
         assert_eq!(read["inputSchema"]["properties"]["limit"]["default"], 200);
@@ -564,7 +564,7 @@ mod tests {
         );
         assert_eq!(read["inputSchema"]["required"], json!(["id"]));
         assert_eq!(read["outputSchema"]["type"], "object");
-        for name in ["send_input", "send_raw_input"] {
+        for name in ["send", "raw"] {
             let input = schemas.iter().find(|tool| tool["name"] == name).unwrap();
             assert_eq!(input["inputSchema"]["required"], json!(["id", "text"]));
             assert_eq!(
@@ -584,14 +584,14 @@ mod tests {
         let manager = SessionManager::new();
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "MANUAL")
             .unwrap();
-        for name in ["send_input", "send_raw_input"] {
+        for name in ["send", "raw"] {
             let manual = invoke(&db, &manager, name, json!({"id":"s","text":"pwd"}));
             assert_eq!(manual["structuredContent"]["error"]["code"], "MANUAL_MODE");
         }
-        let switched = invoke(&db, &manager, "set_mode", json!({"id":"s","mode":"AUTO"}));
+        let switched = invoke(&db, &manager, "mode", json!({"id":"s","mode":"AUTO"}));
         assert_eq!(switched["structuredContent"]["mode"], "AUTO");
         assert_eq!(db.session_mode("s").unwrap(), "AUTO");
-        for name in ["send_input", "send_raw_input"] {
+        for name in ["send", "raw"] {
             let invalid_raw = invoke(
                 &db,
                 &manager,
@@ -607,13 +607,13 @@ mod tests {
             json!({"id":"s","limit":"200"}),
             json!({"id":"s","maxChars":16000}),
         ] {
-            let invalid = invoke(&db, &manager, "read_output", args);
+            let invalid = invoke(&db, &manager, "out", args);
             assert_eq!(
                 invalid["structuredContent"]["error"]["code"],
                 "INVALID_ARGUMENT"
             );
         }
-        let missing = invoke(&db, &manager, "session_state", json!({"id":"missing"}));
+        let missing = invoke(&db, &manager, "state", json!({"id":"missing"}));
         assert_eq!(
             missing["structuredContent"]["error"]["code"],
             "SESSION_NOT_FOUND"
@@ -626,7 +626,7 @@ mod tests {
         let manager = SessionManager::new();
         db.insert_session("s", "p", "Profile", "local", 120, 36, "", "test", "AUTO")
             .unwrap();
-        let empty = invoke(&db, &manager, "read_output", json!({"id":"s"}));
+        let empty = invoke(&db, &manager, "out", json!({"id":"s"}));
         assert_eq!(
             empty["structuredContent"],
             json!({"text":"","hasEarlier":false,"active":true})
@@ -634,7 +634,7 @@ mod tests {
         db.add_output("s", "first\n").unwrap();
         db.add_output("s", "latest\n").unwrap();
         for _ in 0..2 {
-            let result = invoke(&db, &manager, "read_output", json!({"id":"s","limit":1}));
+            let result = invoke(&db, &manager, "out", json!({"id":"s","limit":1}));
             assert_eq!(
                 result["structuredContent"],
                 json!({"text":"latest\n","hasEarlier":true,"active":true})
@@ -642,7 +642,7 @@ mod tests {
         }
         db.update_session_state("s", "DISCONNECTED", Some("test"))
             .unwrap();
-        let closed = invoke(&db, &manager, "read_output", json!({"id":"s"}));
+        let closed = invoke(&db, &manager, "out", json!({"id":"s"}));
         assert_eq!(
             closed["structuredContent"],
             json!({"text":"first\nlatest\n","hasEarlier":false,"active":false})
@@ -650,7 +650,7 @@ mod tests {
         let cancelled = call_tool_with(
             &db,
             &manager,
-            &json!({"name":"read_output","arguments":{"id":"s"}}),
+            &json!({"name":"out","arguments":{"id":"s"}}),
             &AtomicBool::new(true),
             |_| unreachable!(),
         )

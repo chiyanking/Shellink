@@ -80,46 +80,46 @@ def exercise(http_enabled):
                 tools = rpc("tools/list")["tools"]
                 assert len(tools) == 10 and not any(tool["name"] == "screen" for tool in tools)
                 assert all("annotations" in item and "outputSchema" in item for item in tools)
-                read_tool = next(item for item in tools if item["name"] == "read_output")
+                read_tool = next(item for item in tools if item["name"] == "out")
                 assert set(read_tool["inputSchema"]["properties"]) == {"id", "limit"}
-                for name in ("send_input", "send_raw_input"):
+                for name in ("send", "raw"):
                     input_tool = next(item for item in tools if item["name"] == name)
                     assert set(input_tool["inputSchema"]["properties"]) == {"id", "text"}
-                profile = tool("create_profile", name="integration", connectType="command", command="exec /bin/sh")["structuredContent"]
-                session = tool("create_session", profileId=profile["id"])["structuredContent"]["id"]
+                profile = tool("new", name="integration", connectType="command", command="exec /bin/sh")["structuredContent"]
+                session = tool("open", profileId=profile["id"])["structuredContent"]["id"]
                 # The typed command contains octal escapes, so PTY echo cannot fake the marker.
                 raw_command = r"printf '\115\103\120\137\122\101\127\137\117\113\n'"
-                assert tool("send_raw_input", id=session, text=raw_command)["isError"] is False
+                assert tool("raw", id=session, text=raw_command)["isError"] is False
                 time.sleep(0.1)
-                before = tool("read_output", id=session)["structuredContent"]
+                before = tool("out", id=session)["structuredContent"]
                 assert "MCP_RAW_OK" not in before["text"], before
-                assert tool("send_input", id=session, text="")["isError"] is False
+                assert tool("send", id=session, text="")["isError"] is False
                 def marker_output():
-                    snapshot = tool("read_output", id=session)["structuredContent"]
+                    snapshot = tool("out", id=session)["structuredContent"]
                     return snapshot if "MCP_RAW_OK" in snapshot["text"] else None
 
                 latest = wait_until(marker_output)
                 assert set(latest) == {"text", "hasEarlier", "active"}, latest
-                assert "MCP_RAW_OK" in tool("read_output", id=session)["structuredContent"]["text"]
-                tail = tool("read_output", id=session, limit=1)["structuredContent"]
+                assert "MCP_RAW_OK" in tool("out", id=session)["structuredContent"]["text"]
+                tail = tool("out", id=session, limit=1)["structuredContent"]
                 assert len(tail["text"].splitlines()) <= 1 and tail["hasEarlier"] is True, tail
-                assert "MCP_RAW_OK" in tool("read_output", id=session)["structuredContent"]["text"]
+                assert "MCP_RAW_OK" in tool("out", id=session)["structuredContent"]["text"]
                 # A command without a trailing newline is submitted by default.
                 auto_command = r"printf '\115\103\120\137\101\125\124\117\137\117\113\n'"
-                assert tool("send_input", id=session, text=auto_command)["isError"] is False
-                wait_until(lambda: "MCP_AUTO_OK" in tool("read_output", id=session)["structuredContent"]["text"])
+                assert tool("send", id=session, text=auto_command)["isError"] is False
+                wait_until(lambda: "MCP_AUTO_OK" in tool("out", id=session)["structuredContent"]["text"])
                 with sqlite3.connect(database) as db:
                     inputs = db.execute(
                         "SELECT data_raw FROM history_chunks WHERE session_id=? AND direction='input' ORDER BY seq",
                         (session,),
                     ).fetchall()
                 assert inputs == [(raw_command,), (auto_command + "\n",)], inputs
-                tool("set_mode", id=session, mode="MANUAL")
-                for name in ("send_input", "send_raw_input"):
+                tool("mode", id=session, mode="MANUAL")
+                for name in ("send", "raw"):
                     denied = tool(name, id=session, text="pwd")
                     assert denied["structuredContent"]["error"]["code"] == "MANUAL_MODE"
-                assert tool("set_mode", id=session, mode="AUTO")["structuredContent"]["mode"] == "AUTO"
-                assert tool("send_input", id=session, text="exit 7")["isError"] is False
+                assert tool("mode", id=session, mode="AUTO")["structuredContent"]["mode"] == "AUTO"
+                assert tool("send", id=session, text="exit 7")["isError"] is False
 
                 # Poll SQLite directly: exit tracking must work without a UI/MCP state query.
                 def exited():
@@ -127,7 +127,7 @@ def exercise(http_enabled):
                         state, code = db.execute("SELECT state,exit_code FROM sessions WHERE id=?", (session,)).fetchone()
                     return state == "DISCONNECTED" and code == 7
                 wait_until(exited)
-                state = tool("session_state", id=session)["structuredContent"]
+                state = tool("state", id=session)["structuredContent"]
                 assert state["active"] is False and state["exitCode"] == 7
                 token = "integration-rotated-token"
                 with sqlite3.connect(database) as db:
@@ -147,9 +147,9 @@ def exercise(http_enabled):
 
                 if http_enabled:
                     assert request_http()[0] == 200
-                    status, payload = request_http(rpc_request={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "read_output", "arguments": {"id": session}}})
+                    status, payload = request_http(rpc_request={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "out", "arguments": {"id": session}}})
                     assert status == 200
-                    assert json.loads(payload)["result"]["structuredContent"] == tool("read_output", id=session)["structuredContent"]
+                    assert json.loads(payload)["result"]["structuredContent"] == tool("out", id=session)["structuredContent"]
                     assert request_http("GET")[0] == 405
                     assert request_http(extra={"Origin": "http://evil.invalid"})[0] == 403
                     assert request_http(extra={"MCP-Protocol-Version": "invalid"})[0] == 400
