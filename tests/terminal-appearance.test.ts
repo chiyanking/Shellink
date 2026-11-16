@@ -3,17 +3,17 @@ import { test } from 'node:test'
 import { createCommandHighlighter, terminalTheme } from '../src/terminal-appearance.ts'
 
 const RESET = '\x1b[0m'
-const DARK_COMMAND = '\x1b[1;38;2;239;235;223m'
-const DARK_PROMPT = '\x1b[38;2;172;203;152m'
-const DARK_PATH = '\x1b[38;2;219;172;131m'
+const DARK_COMMAND = '\x1b[1;38;2;233;236;245m'
+const DARK_PROMPT = '\x1b[38;2;143;208;171m'
+const DARK_PATH = '\x1b[38;2;124;154;255m'
 
 test('dark and light themes use their own canvas instead of a stale CSS variable', () => {
-  assert.equal(terminalTheme('dark').background, '#171916')
-  assert.equal(terminalTheme('dark').foreground, '#d0cdbf')
+  assert.equal(terminalTheme('dark').background, '#12141a')
+  assert.equal(terminalTheme('dark').foreground, '#ccd2e0')
   assert.equal(terminalTheme('light').background, '#ffffff')
-  assert.equal(terminalTheme('light').foreground, '#414141')
-  assert.equal(terminalTheme('dark').green, '#a9c59b')
-  assert.equal(terminalTheme('dark').brightWhite, '#efebdf')
+  assert.equal(terminalTheme('light').foreground, '#3b4254')
+  assert.equal(terminalTheme('dark').green, '#8fd0ab')
+  assert.equal(terminalTheme('dark').brightWhite, '#e9ecf5')
 })
 
 function luminance(hex: string): number {
@@ -24,20 +24,49 @@ function luminance(hex: string): number {
   return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
 }
 
-test('ANSI output stays readable against both terminal canvases', () => {
+function contrast(fg: string, bg: string): number {
+  const a = luminance(fg); const b = luminance(bg)
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+}
+
+test('dark-family ANSI roles stay readable against both canvases', () => {
   const roles = [
-    'foreground', 'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+    'foreground', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
     'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue',
-    'brightMagenta', 'brightCyan', 'brightWhite',
+    'brightMagenta', 'brightCyan',
   ] as const
+  // white/brightWhite are excluded: they intentionally keep standard ANSI
+  // semantics (light) for TUI-painted backgrounds, and are covered by the
+  // ANSI-black contrast test below.
   for (const scheme of ['light', 'dark'] as const) {
     const theme = terminalTheme(scheme)
-    const background = luminance(theme.background!)
     for (const role of roles) {
-      const foreground = luminance(theme[role]!)
-      const contrast = (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05)
-      assert.ok(contrast >= 4.5, `${scheme} ${role} contrast is ${contrast.toFixed(2)}`)
+      const value = contrast(theme[role]!, theme.background!)
+      assert.ok(value >= 4.5, `${scheme} ${role} canvas contrast is ${value.toFixed(2)}`)
     }
+  }
+})
+
+test('white-family ANSI roles stay readable on a TUI-painted ANSI black background', () => {
+  // TUIs (k9s, htop, vim) fill their background with ANSI black and render
+  // primary text via the white roles; black itself stays dark so that
+  // painted background keeps its contrast.
+  for (const scheme of ['light', 'dark'] as const) {
+    const theme = terminalTheme(scheme)
+    for (const role of ['white', 'brightWhite'] as const) {
+      const value = contrast(theme[role]!, theme.black!)
+      assert.ok(value >= 4.5, `${scheme} ${role} on ANSI black is ${value.toFixed(2)}`)
+    }
+    const ansiRoles = [
+      'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+      'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue',
+      'brightMagenta', 'brightCyan', 'brightWhite',
+    ] as const
+    const lums = ansiRoles.map(role => luminance(theme[role]!))
+    assert.ok(lums.every(l => l >= luminance(theme.black!)), `${scheme} black stays darkest`)
+    assert.ok(lums.every(l => l <= luminance(theme.brightWhite!)), `${scheme} brightWhite stays brightest`)
+    assert.ok(luminance(theme.brightWhite!) > luminance(theme.white!), `${scheme} brightWhite stays brighter than white`)
+    assert.ok(luminance(theme.white!) > luminance(theme.brightBlack!), `${scheme} white stays brighter than brightBlack`)
   }
 })
 

@@ -61,17 +61,24 @@ type AnsiPalette = Pick<
   | 'brightBlue' | 'brightMagenta' | 'brightCyan' | 'brightWhite'
 >
 
-/** Each scheme preserves ANSI colour roles with contrast against its own canvas. */
+/**
+ * Bright roles keep standard ANSI semantics: 7/15 (white, brightWhite) stay
+ * light and 0 (black) stays dark. TUIs such as k9s paint their own background
+ * with ANSI black and render primary text in the white roles, so tinting those
+ * for contrast against the app canvas makes the text vanish on the TUI's dark
+ * painted background. Dark-family roles remain tinted for the white canvas;
+ * full-colour (256/truecolour) output is unaffected and stays readable on both.
+ */
 const ansiPalettes: Record<ColorScheme, AnsiPalette> = {
   light: {
-    black: '#2c3443', red: '#c04a41', green: '#26855c', yellow: '#9a7213',
-    blue: '#3b5bdb', magenta: '#8f4a86', cyan: '#0f7f8a', white: '#6b7280',
-    brightBlack: '#737d92', brightRed: '#a53a33', brightGreen: '#1e6a4b',
+    black: '#2c3443', red: '#c04a41', green: '#26855c', yellow: '#8f6a12',
+    blue: '#3b5bdb', magenta: '#8f4a86', cyan: '#0f7f8a', white: '#959db0',
+    brightBlack: '#64708a', brightRed: '#a53a33', brightGreen: '#1e6a4b',
     brightYellow: '#82620f', brightBlue: '#3251c4', brightMagenta: '#7c3f74',
-    brightCyan: '#0d6c77', brightWhite: '#1b2233',
+    brightCyan: '#0d6c77', brightWhite: '#e9ecf5',
   },
   dark: {
-    black: '#6f7688', red: '#e29389', green: '#8fd0ab', yellow: '#d9bd85',
+    black: '#3d4356', red: '#e29389', green: '#8fd0ab', yellow: '#d9bd85',
     blue: '#7c9aff', magenta: '#c9a3e0', cyan: '#6fc7b2', white: '#ccd2e0',
     brightBlack: '#8f96ac', brightRed: '#eda79d', brightGreen: '#a8dcbf',
     brightYellow: '#e6cf9e', brightBlue: '#9ab0ff', brightMagenta: '#d8bcee',
