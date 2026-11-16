@@ -80,6 +80,10 @@ function TerminalContent({ session }: { session: Session }) {
       fontFamily: `"${font}", monospace`,
       fontSize: Number(fontSize),
       lineHeight: 1.35,
+      // TUIs and remote banners pick arbitrary ANSI fg/bg pairs (e.g. bright
+      // black on green); make xterm darken/lighten the foreground until the
+      // pair reaches WCAG AA instead of chasing each combination in the palette.
+      minimumContrastRatio: 4.5,
       // xterm 6 uses this width for both its scrollbar and FitAddon's column budget.
       overviewRuler: { width: TERMINAL_SCROLLBAR_WIDTH },
       theme: terminalTheme(colorScheme),
