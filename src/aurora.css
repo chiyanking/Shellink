@@ -333,6 +333,7 @@
 .terminal-encoding { flex-shrink: 0; color: var(--subtle-foreground); font: 9px var(--font-mono); }
 .terminal-session-meta > .ui-button { flex-shrink: 0; width: 24px; height: 24px; color: var(--muted-foreground); }
 .terminal-session-meta > .ui-button:hover { color: var(--foreground); background: var(--surface-hover); }
+.terminal-session-meta > .ui-button.terminal-close-button:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 .terminal-viewport { inset: 2px 0 2px 6px; }
 @container terminal-panel (max-width: 760px) {
   .terminal-header-notice { display: none; }

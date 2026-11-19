@@ -749,6 +749,10 @@ select {
   flex: 1 1 auto;
   justify-content: flex-end;
 }
+.terminal-session-meta > .ui-button.terminal-close-button:hover:not(:disabled) {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
 .terminal-header-notice {
   display: flex;
   align-items: center;

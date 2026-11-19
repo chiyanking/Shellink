@@ -236,6 +236,17 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
             {sessionStatus[session.status].label}
           </span>
           <span className="terminal-encoding">UTF-8</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="terminal-close-button"
+            aria-label={closing ? '正在关闭会话' : '关闭会话'}
+            title={session.status === 'ended' ? '会话已结束' : closing ? '正在关闭…' : '关闭会话（终端历史会保留）'}
+            disabled={closing || session.status === 'ended'}
+            onClick={() => void closeSession()}
+          >
+            <Power size={14} />
+          </Button>
           <Menu
             trigger={
               <Button variant="ghost" size="icon" aria-label="终端选项">
@@ -252,13 +263,6 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
                 label: '查看终端历史',
                 icon: <History size={14} />,
                 onSelect: () => inspectHistory(session.id),
-              },
-              {
-                label: closing ? '正在关闭…' : '关闭会话',
-                icon: <Power size={14} />,
-                danger: true,
-                disabled: closing || session.status === 'ended',
-                onSelect: () => void closeSession(),
               },
             ]}
           />
