@@ -44,7 +44,7 @@ export function ContextPanel() {
     page, sessions, selectedSession, openSession, deleteSession, deleteSessions, deletingSessions, openModal, connections, openConnection, editConnection,
     connectionGroup, setConnectionGroup,
     connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
-    mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime,
+    mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime, setSessionManual,
   } = useDesign()
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<string[]>([])
@@ -108,8 +108,15 @@ export function ContextPanel() {
         >
           {!selecting && <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />}
           <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created}</small></span>
-          {session.status !== 'ended' && (session.mode === 'AUTO' ? <Bot size={12} className="context-mode-icon" /> : <Hand size={12} className="context-mode-icon" />)}
         </button>
+        {session.status !== 'ended' && <button
+          className="context-mode-toggle"
+          aria-label={session.mode === 'AUTO' ? `将 ${session.name} 切换为手动控制` : `将 ${session.name} 切换为 AI 自动控制`}
+          title={session.mode === 'AUTO' ? 'AI 自动控制 · 点击切换为手动' : '手动控制 · 点击切换为 AI 自动'}
+          onClick={() => setSessionManual(session.id, session.mode === 'AUTO')}
+        >
+          {session.mode === 'AUTO' ? <Bot size={12} className="context-mode-icon" /> : <Hand size={12} className="context-mode-icon" />}
+        </button>}
       </div>
       return session.status === 'ended' && !selecting ? <ContextMenu key={session.id} items={[
         { label: '删除会话', icon: <Trash2 size={14} />, danger: true, disabled: deletingSessions, onSelect: () => deleteSession(session.id) },

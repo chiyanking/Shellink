@@ -7,7 +7,6 @@ import {
   ArrowRight,
   Bot,
   Ellipsis,
-  Hand,
   History,
   Keyboard,
   PanelsTopLeft,
@@ -159,7 +158,6 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
   const {
     sessions,
     connections,
-    setSessionManual,
     inspectHistory,
     split,
     setSplit,
@@ -168,9 +166,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
   } = useDesign()
   const [closing, setClosing] = useState(false)
   const connection = connections.find((item) => item.id === session.connectionId) ?? emptyConnection
-  const manual = session.mode === 'MANUAL'
   const address = `${connection.user ? `${connection.user}@` : ''}${connection.host}${connection.type === 'SSH' ? `:${connection.port}` : ''}`
-  const setManual = (value: boolean) => setSessionManual(session.id, value)
   async function closeSession() {
     if (closing || session.status === 'ended') return
     setClosing(true)
@@ -204,30 +200,6 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           </button>
         </Hint>
         <div className="terminal-session-meta">
-          <div className="terminal-control" role="group" aria-label="控制权模式">
-            <button
-              className={cn('terminal-control-option', !manual && 'is-active')}
-              aria-pressed={!manual}
-              aria-label="AI 自动控制"
-              title="允许 MCP 写入 · 你可以随时接管"
-              disabled={closing || session.status === 'ended'}
-              onClick={() => setManual(false)}
-            >
-              <Bot size={12} />
-              AI
-            </button>
-            <button
-              className={cn('terminal-control-option', manual && 'is-active')}
-              aria-pressed={manual}
-              aria-label="手动控制"
-              title="你正在控制终端 · AI 写入已暂停"
-              disabled={closing || session.status === 'ended'}
-              onClick={() => setManual(true)}
-            >
-              <Hand size={12} />
-              手动
-            </button>
-          </div>
           <span className={cn('terminal-ready', session.status === 'ended' && 'is-ended', session.status === 'attention' && 'is-attention')}>
             <span className={cn('status-dot', session.status === 'ended' && 'is-offline')} />
             {sessionStatus[session.status].label}

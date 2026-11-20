@@ -753,46 +753,6 @@ select {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 14%, transparent);
 }
-.terminal-control {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  height: 26px;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  flex-shrink: 0;
-}
-.terminal-control-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 7px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.terminal-control-option:hover:not(:disabled) {
-  color: var(--foreground);
-  background: var(--surface-hover);
-}
-.terminal-control-option.is-active {
-  color: var(--foreground);
-  background: var(--surface-raised);
-  box-shadow: 0 1px 2px #00000020;
-}
-.terminal-control-option.is-active svg {
-  color: var(--primary-text);
-}
-.terminal-control-option:disabled {
-  cursor: default;
-  opacity: .58;
-}
 .terminal-ready {
   display: flex;
   align-items: center;
