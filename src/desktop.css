@@ -753,37 +753,6 @@ select {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 14%, transparent);
 }
-.terminal-header-notice {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  max-width: min(400px, 30vw);
-  border: 0;
-  background: transparent;
-  border-radius: 5px;
-  padding: 0;
-  color: var(--muted-foreground);
-  font-size: 10px;
-}
-.terminal-header-notice > div {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.terminal-header-notice > div > svg {
-  color: var(--primary-text);
-  flex-shrink: 0;
-}
-.terminal-header-notice > div > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.terminal-header-notice.is-manual > div > svg {
-  color: var(--amber);
-}
 .terminal-control {
   display: flex;
   align-items: center;
@@ -842,6 +811,12 @@ select {
   width: 5px;
   height: 5px;
   flex-basis: 5px;
+}
+.terminal-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 .terminal-session-id {
   display: inline-flex;
@@ -2107,11 +2082,6 @@ select {
     margin-left: 0;
     justify-content: space-between;
     gap: 7px;
-  }
-  .terminal-header-notice {
-    flex: 1 1 100%;
-    max-width: none;
-    order: 1;
   }
   .toolbar-right {
     width: 100%;

@@ -316,30 +316,25 @@
 .terminal-connection .terminal-port { margin-left: 0; }
 .terminal-connection .ui-badge { flex-shrink: 0; margin-left: 0; padding: 0; background: transparent; border: 0; }
 .terminal-session-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; min-width: 0; width: auto; margin-left: auto; }
-.terminal-control { order: -1; display: inline-flex; align-items: center; gap: 2px; padding: 0; height: 24px; border: 0; border-radius: 0; background: transparent; flex-shrink: 0; }
+.terminal-control { display: inline-flex; align-items: center; gap: 2px; padding: 0; height: 24px; border: 0; border-radius: 0; background: transparent; flex-shrink: 0; }
 .terminal-control-option { justify-content: center; width: 48px; height: 20px; border-radius: 3px; padding: 0 5px; font-size: 10px; }
 .terminal-control-option.is-active, .terminal-control-option.is-active:hover:not(:disabled) { color: var(--primary-text); background: var(--primary-soft); box-shadow: none; }
 .terminal-control-option.is-active svg { color: inherit; }
-.terminal-header-notice { flex: 1; min-width: 0; max-width: none; order: 0; font-size: 10px; overflow: hidden; }
-.terminal-header-notice > div > svg { color: var(--primary-text); }
-.terminal-header-notice > div > span { color: var(--muted-foreground); }
-.terminal-ready { margin-left: auto; padding: 0; border-radius: 0; background: transparent; color: var(--green); font-size: 9px; white-space: nowrap; }
+.terminal-ready { padding: 0; border-radius: 0; background: transparent; color: var(--green); font-size: 9px; white-space: nowrap; }
 .terminal-ready.is-ended { background: transparent; color: var(--muted-foreground); }
 .terminal-ready.is-attention { background: transparent; color: var(--amber); }
 .terminal-ready.is-attention .status-dot { background: var(--amber); }
 .terminal-frame { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; overflow: hidden; background: var(--terminal-canvas); }
-.terminal-encoding { flex-shrink: 0; color: var(--subtle-foreground); font: 9px var(--font-mono); }
+.terminal-divider { width: 1px; height: 12px; background: var(--border); flex-shrink: 0; }
 .terminal-session-id { max-width: 150px; height: 20px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--subtle-foreground); }
 .terminal-session-id:hover { background: var(--surface-hover); color: var(--foreground); }
 .terminal-session-meta > .ui-button { flex-shrink: 0; width: 24px; height: 24px; color: var(--muted-foreground); }
 .terminal-session-meta > .ui-button:hover { color: var(--foreground); background: var(--surface-hover); }
 .terminal-session-meta > .ui-button.terminal-close-button:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 .terminal-viewport { inset: 2px 0 2px 6px; }
-@container terminal-panel (max-width: 760px) {
-  .terminal-header-notice { display: none; }
-}
 @container terminal-panel (max-width: 540px) {
-  .terminal-ready, .terminal-encoding { display: none; }
+  .terminal-ready { display: none; }
+  .terminal-divider { display: none; }
   .terminal-session-id { max-width: 26px; padding: 0 6px; }
   .terminal-session-id > span { display: none; }
 }

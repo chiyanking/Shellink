@@ -14,7 +14,6 @@ import {
   PanelsTopLeft,
   Plus,
   Power,
-  Radio,
   Server,
   Workflow,
   ShieldCheck,
@@ -172,7 +171,6 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
   const connection = connections.find((item) => item.id === session.connectionId) ?? emptyConnection
   const manual = session.mode === 'MANUAL'
   const address = `${connection.user ? `${connection.user}@` : ''}${connection.host}${connection.type === 'SSH' ? `:${connection.port}` : ''}`
-  const controlNotice = manual ? '你正在控制终端 · AI 写入已暂停' : '允许 MCP 写入 · 你可以随时接管'
   const setManual = (value: boolean) => setSessionManual(session.id, value)
   async function closeSession() {
     if (closing || session.status === 'ended') return
@@ -201,16 +199,13 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
           </span>
           <Badge>{connection.type === 'Local' ? 'LOCAL' : 'SSH'}</Badge>
         </div>
+        <Hint label={`点击复制会话 ID · ${session.id}`}>
+          <button className="terminal-session-id" aria-label={`复制会话 ID ${session.id}`} onClick={copySessionId}>
+            <span>{session.id}</span>
+            <Copy size={11} />
+          </button>
+        </Hint>
         <div className="terminal-session-meta">
-          <div
-            className={cn('terminal-header-notice', manual && 'is-manual')}
-            title={session.status === 'ended' ? `会话已结束 · ${session.result} · 终端输出已保留` : controlNotice}
-          >
-            <div>
-              {session.status === 'ended' ? <History size={13} /> : manual ? <Keyboard size={13} /> : <Radio size={13} />}
-              <span>{session.status === 'ended' ? `已结束 · ${session.result}` : manual ? 'AI 写入已暂停' : 'MCP 可写入'}</span>
-            </div>
-          </div>
           <div className="terminal-control" role="group" aria-label="控制权模式">
             <button
               className={cn('terminal-control-option', !manual && 'is-active')}
@@ -239,13 +234,7 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
             <span className={cn('status-dot', session.status === 'ended' && 'is-offline')} />
             {sessionStatus[session.status].label}
           </span>
-          <span className="terminal-encoding">UTF-8</span>
-          <Hint label={`点击复制会话 ID · ${session.id}`}>
-            <button className="terminal-session-id" aria-label={`复制会话 ID ${session.id}`} onClick={copySessionId}>
-              <span>{session.id}</span>
-              <Copy size={11} />
-            </button>
-          </Hint>
+          <span className="terminal-divider" aria-hidden="true" />
           <Button
             variant="ghost"
             size="icon"
