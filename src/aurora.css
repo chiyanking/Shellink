@@ -326,7 +326,7 @@
 .terminal-ready.is-attention .status-dot { background: var(--amber); }
 .terminal-frame { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; overflow: hidden; background: var(--terminal-canvas); }
 .terminal-divider { width: 1px; height: 12px; background: var(--border); flex-shrink: 0; }
-.terminal-session-id { max-width: 150px; height: 20px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--subtle-foreground); }
+.terminal-session-id { height: 20px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--subtle-foreground); }
 .terminal-session-id:hover { background: var(--surface-hover); color: var(--foreground); }
 .terminal-session-meta > .ui-button { flex-shrink: 0; width: 24px; height: 24px; color: var(--muted-foreground); }
 .terminal-session-meta > .ui-button:hover { color: var(--foreground); background: var(--surface-hover); }
@@ -335,7 +335,6 @@
 @container terminal-panel (max-width: 540px) {
   .terminal-ready { display: none; }
   .terminal-divider { display: none; }
-  .terminal-session-id { max-width: 76px; }
 }
 @container terminal-panel (max-width: 380px) {
   .terminal-connection .ui-badge { display: none; }
