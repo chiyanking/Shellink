@@ -1,6 +1,6 @@
 import { useEffect, useState, type DragEvent } from 'react'
 import {
-  ArrowUpRight, Bot, ChevronDown, Code2, Copy, FileClock, Globe, Keyboard,
+  ArrowUpRight, Bot, ChevronDown, Code2, FileClock, Globe, Keyboard,
   FolderPlus, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
   Terminal, Trash2, Workflow,
 } from 'lucide-react'
@@ -44,7 +44,7 @@ export function ContextPanel() {
     page, sessions, selectedSession, openSession, deleteSession, deleteSessions, deletingSessions, openModal, connections, openConnection, editConnection,
     connectionGroup, setConnectionGroup,
     connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
-    mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime, notify,
+    mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime,
   } = useDesign()
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<string[]>([])
@@ -110,13 +110,6 @@ export function ContextPanel() {
           <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created}</small></span>
           {session.status !== 'ended' && session.mode === 'AUTO' && <Bot size={12} className="context-bot" />}
         </button>
-        {session.status !== 'ended' && <Hint label={`复制会话 ID · ${session.id}`}>
-          <button
-            className="context-session-copy"
-            aria-label={`复制 ${session.name} 的会话 ID`}
-            onClick={() => void navigator.clipboard.writeText(session.id).then(() => notify('已复制会话 ID')).catch(() => notify('复制失败，请重试'))}
-          ><Copy size={12} /></button>
-        </Hint>}
       </div>
       return session.status === 'ended' && !selecting ? <ContextMenu key={session.id} items={[
         { label: '删除会话', icon: <Trash2 size={14} />, danger: true, disabled: deletingSessions, onSelect: () => deleteSession(session.id) },

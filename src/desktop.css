@@ -843,6 +843,38 @@ select {
   height: 5px;
   flex-basis: 5px;
 }
+.terminal-session-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 150px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--muted-foreground);
+  font: 9px var(--font-mono);
+  cursor: pointer;
+  flex-shrink: 1;
+}
+.terminal-session-id > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-session-id > svg {
+  flex-shrink: 0;
+  opacity: .65;
+}
+.terminal-session-id:hover {
+  color: var(--foreground);
+  background: var(--surface-hover);
+}
+.terminal-session-id:hover > svg {
+  opacity: 1;
+}
 .terminal-output {
   flex: 1;
   overflow-x: auto;

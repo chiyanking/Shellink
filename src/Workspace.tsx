@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import {
   ArrowRight,
   Bot,
+  Copy,
   Ellipsis,
   Hand,
   History,
@@ -24,7 +25,7 @@ import { useDesign } from './context'
 import { createCommandHighlighter, terminalTheme } from './terminal-appearance'
 import { emptyConnection, sessionStatus, type Session } from './data'
 import { errorText, onCoreEvent, rpc } from './backend'
-import { Badge, Button, Menu } from './components/ui'
+import { Badge, Button, Hint, Menu } from './components/ui'
 import { cn } from './lib/utils'
 import { createTerminalInput } from './terminal-input'
 
@@ -183,6 +184,9 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
     } catch (error) { notify(errorText(error)) }
     finally { setClosing(false) }
   }
+  function copySessionId() {
+    void navigator.clipboard.writeText(session.id).then(() => notify('已复制会话 ID')).catch(() => notify('复制失败，请重试'))
+  }
   return (
     <section
       className={cn('terminal-panel', secondary && 'terminal-panel-secondary')}
@@ -236,6 +240,12 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
             {sessionStatus[session.status].label}
           </span>
           <span className="terminal-encoding">UTF-8</span>
+          <Hint label={`点击复制会话 ID · ${session.id}`}>
+            <button className="terminal-session-id" aria-label={`复制会话 ID ${session.id}`} onClick={copySessionId}>
+              <span>{session.id}</span>
+              <Copy size={11} />
+            </button>
+          </Hint>
           <Button
             variant="ghost"
             size="icon"
