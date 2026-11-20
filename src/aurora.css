@@ -162,10 +162,6 @@
 .context-session-select { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; align-self: stretch; padding: 8px 6px 8px 9px; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; }
 .ui-menu-item[data-disabled] { opacity: .4; pointer-events: none; }
 .context-session.is-active { background: var(--selected); }
-.context-mode-icon { color: var(--primary-text); flex-shrink: 0; }
-.context-mode-toggle { display: grid; place-items: center; width: 25px; height: 26px; flex-shrink: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--subtle-foreground); }
-.context-mode-toggle:hover { background: var(--primary-soft); }
-.context-mode-toggle:hover .context-mode-icon { color: var(--primary-text); }
 .context-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px; }
 .context-dot.is-live { background: var(--green); }
 .context-dot.is-ended { background: var(--subtle-foreground); opacity: .6; }

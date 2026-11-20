@@ -1,6 +1,6 @@
 import { useEffect, useState, type DragEvent } from 'react'
 import {
-  ArrowUpRight, Bot, ChevronDown, Code2, FileClock, Globe, Hand, Keyboard,
+  ArrowUpRight, Bot, ChevronDown, Code2, FileClock, Globe, Keyboard,
   FolderPlus, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
   Terminal, Trash2, Workflow,
 } from 'lucide-react'
@@ -103,20 +103,16 @@ export function ContextPanel() {
           className="context-session-select"
           aria-pressed={selected}
           disabled={selecting && deletingSessions}
-          onClick={() => selecting ? toggleSessionSelection(session.id) : page === 'history' ? inspectHistory(session.id) : openSession(session.id)}
-          title={`${session.name} · ${session.id}${selecting ? ' · 点击选择' : session.status === 'ended' ? ' · 右键删除' : ''}`}
+          onClick={() => selecting
+            ? toggleSessionSelection(session.id)
+            : page === 'history' ? inspectHistory(session.id)
+              : session.status === 'ended' ? openSession(session.id)
+                : setSessionManual(session.id, session.mode === 'AUTO')}
+          title={`${session.name} · ${session.id}${selecting ? ' · 点击选择' : session.status === 'ended' ? ' · 点击打开终端回放 · 右键删除' : ' · 点击切换 AI 自动 / 手动控制'}`}
         >
           {!selecting && <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />}
           <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created}</small></span>
         </button>
-        {session.status !== 'ended' && <button
-          className="context-mode-toggle"
-          aria-label={session.mode === 'AUTO' ? `将 ${session.name} 切换为手动控制` : `将 ${session.name} 切换为 AI 自动控制`}
-          title={session.mode === 'AUTO' ? 'AI 自动控制 · 点击切换为手动' : '手动控制 · 点击切换为 AI 自动'}
-          onClick={() => setSessionManual(session.id, session.mode === 'AUTO')}
-        >
-          {session.mode === 'AUTO' ? <Bot size={12} className="context-mode-icon" /> : <Hand size={12} className="context-mode-icon" />}
-        </button>}
       </div>
       return session.status === 'ended' && !selecting ? <ContextMenu key={session.id} items={[
         { label: '删除会话', icon: <Trash2 size={14} />, danger: true, disabled: deletingSessions, onSelect: () => deleteSession(session.id) },
