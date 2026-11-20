@@ -6,7 +6,6 @@ import '@xterm/xterm/css/xterm.css'
 import {
   ArrowRight,
   Bot,
-  Copy,
   Ellipsis,
   Hand,
   History,
@@ -202,7 +201,6 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
         <Hint label={`点击复制会话 ID · ${session.id}`}>
           <button className="terminal-session-id" aria-label={`复制会话 ID ${session.id}`} onClick={copySessionId}>
             <span>{session.id}</span>
-            <Copy size={11} />
           </button>
         </Hint>
         <div className="terminal-session-meta">

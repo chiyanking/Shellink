@@ -162,7 +162,7 @@
 .context-session-select { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; align-self: stretch; padding: 8px 6px 8px 9px; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; }
 .ui-menu-item[data-disabled] { opacity: .4; pointer-events: none; }
 .context-session.is-active { background: var(--selected); }
-.context-bot { color: var(--primary-text); }
+.context-mode-icon { color: var(--primary-text); flex-shrink: 0; }
 .context-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px; }
 .context-dot.is-live { background: var(--green); }
 .context-dot.is-ended { background: var(--subtle-foreground); opacity: .6; }
@@ -335,8 +335,7 @@
 @container terminal-panel (max-width: 540px) {
   .terminal-ready { display: none; }
   .terminal-divider { display: none; }
-  .terminal-session-id { max-width: 26px; padding: 0 6px; }
-  .terminal-session-id > span { display: none; }
+  .terminal-session-id { max-width: 76px; }
 }
 @container terminal-panel (max-width: 380px) {
   .terminal-connection .ui-badge { display: none; }

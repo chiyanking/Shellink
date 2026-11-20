@@ -839,16 +839,9 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.terminal-session-id > svg {
-  flex-shrink: 0;
-  opacity: .65;
-}
 .terminal-session-id:hover {
   color: var(--foreground);
   background: var(--surface-hover);
-}
-.terminal-session-id:hover > svg {
-  opacity: 1;
 }
 .terminal-output {
   flex: 1;

@@ -1,6 +1,6 @@
 import { useEffect, useState, type DragEvent } from 'react'
 import {
-  ArrowUpRight, Bot, ChevronDown, Code2, FileClock, Globe, Keyboard,
+  ArrowUpRight, Bot, ChevronDown, Code2, FileClock, Globe, Hand, Keyboard,
   FolderPlus, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
   Terminal, Trash2, Workflow,
 } from 'lucide-react'
@@ -108,7 +108,7 @@ export function ContextPanel() {
         >
           {!selecting && <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />}
           <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created}</small></span>
-          {session.status !== 'ended' && session.mode === 'AUTO' && <Bot size={12} className="context-bot" />}
+          {session.status !== 'ended' && (session.mode === 'AUTO' ? <Bot size={12} className="context-mode-icon" /> : <Hand size={12} className="context-mode-icon" />)}
         </button>
       </div>
       return session.status === 'ended' && !selecting ? <ContextMenu key={session.id} items={[
