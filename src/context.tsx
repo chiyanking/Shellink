@@ -36,6 +36,7 @@ export type DesignContext = {
   sessions: Session[]
   selectedSession: Session
   openSession: (id: string) => void
+  openWelcome: () => void
   deleteSession: (id: string) => void
   deleteSessions: (ids: string[]) => void
   deletingSessions: boolean

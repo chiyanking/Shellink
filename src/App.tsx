@@ -135,6 +135,7 @@ export default function App() {
     if (!sessions.some(item => item.id === id)) return
     setSelectedSessionId(id); navigate('workspace')
   }, [sessions, navigate])
+  function openWelcome() { setSelectedSessionId(''); navigate('workspace') }
   async function createSession(connectionId: string, name = '') {
     setSaving(true)
     try {
@@ -279,6 +280,7 @@ export default function App() {
         sessions,
         selectedSession,
         openSession,
+        openWelcome,
         deleteSession,
         deleteSessions,
         deletingSessions,

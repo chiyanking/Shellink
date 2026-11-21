@@ -24,10 +24,10 @@ export const settingsNavigation: { id: SettingsTab; label: string; icon: typeof 
 ]
 
 export function NavigationRail() {
-  const { page, navigate, openModal, runtime } = useDesign()
+  const { page, navigate, openModal, runtime, openWelcome } = useDesign()
   return <nav className="navigation-rail" aria-label="主导航">
     <Hint label="shellink · 个人工作区">
-      <button className="rail-logo" aria-label="shellink 工作台" onClick={() => navigate('workspace')}><Terminal size={20} strokeWidth={2.4} /></button>
+      <button className="rail-logo" aria-label="shellink 工作台" onClick={openWelcome}><Terminal size={20} strokeWidth={2.4} /></button>
     </Hint>
     {navigation.map(item => <Hint key={item.id} label={`${item.label} · ⌘${item.shortcut}`}>
       <button className={cn('rail-button', page === item.id && 'is-active')} aria-label={item.label} aria-current={page === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><item.icon size={19} /></button>
