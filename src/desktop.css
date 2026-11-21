@@ -704,42 +704,6 @@ select {
   border-bottom: 1px solid var(--border);
   overflow: hidden;
 }
-.terminal-connection {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  flex: 0 1 auto;
-  height: 30px;
-  padding: 0 10px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--foreground);
-  font: 11.5px var(--font-mono);
-}
-.terminal-connection > span:not(.terminal-port) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.terminal-connection > svg {
-  color: var(--green);
-  flex: 0 0 auto;
-}
-.terminal-connection .terminal-port {
-  margin-left: -4px;
-  color: var(--muted-foreground);
-}
-.terminal-connection .ui-badge {
-  font: 9px var(--font-mono);
-  padding: 2px 5px;
-  min-height: 16px;
-  margin-left: 3px;
-  background: color-mix(in srgb, var(--muted) 60%, transparent);
-  border-color: transparent;
-  color: var(--muted-foreground);
-}
 .terminal-session-meta {
   display: flex;
   align-items: center;
@@ -781,22 +745,26 @@ select {
 .terminal-session-id {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 22px;
-  padding: 0 8px;
+  gap: 7px;
+  min-width: 0;
+  flex: 0 1 auto;
+  height: 30px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--background);
-  color: var(--muted-foreground);
-  font: 9px var(--font-mono);
+  background: var(--surface-raised);
+  color: var(--foreground);
+  font: 11.5px var(--font-mono);
   cursor: pointer;
-  flex-shrink: 0;
 }
 .terminal-session-id > span {
   white-space: nowrap;
 }
+.terminal-session-id > svg {
+  color: var(--green);
+  flex-shrink: 0;
+}
 .terminal-session-id:hover {
-  color: var(--foreground);
   background: var(--surface-hover);
 }
 .terminal-output {

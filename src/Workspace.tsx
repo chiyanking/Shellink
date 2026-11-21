@@ -20,9 +20,9 @@ import {
 } from 'lucide-react'
 import { useDesign } from './context'
 import { createCommandHighlighter, terminalTheme } from './terminal-appearance'
-import { emptyConnection, sessionStatus, type Session } from './data'
+import { sessionStatus, type Session } from './data'
 import { errorText, onCoreEvent, rpc } from './backend'
-import { Badge, Button, Hint, Menu } from './components/ui'
+import { Button, Hint, Menu } from './components/ui'
 import { cn } from './lib/utils'
 import { createTerminalInput } from './terminal-input'
 
@@ -157,7 +157,6 @@ function TerminalContent({ session }: { session: Session }) {
 function TerminalPanel({ session, secondary = false }: { session: Session; secondary?: boolean }) {
   const {
     sessions,
-    connections,
     inspectHistory,
     split,
     setSplit,
@@ -165,8 +164,6 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
     refresh,
   } = useDesign()
   const [closing, setClosing] = useState(false)
-  const connection = connections.find((item) => item.id === session.connectionId) ?? emptyConnection
-  const address = `${connection.user ? `${connection.user}@` : ''}${connection.host}${connection.type === 'SSH' ? `:${connection.port}` : ''}`
   async function closeSession() {
     if (closing || session.status === 'ended') return
     setClosing(true)
@@ -186,16 +183,9 @@ function TerminalPanel({ session, secondary = false }: { session: Session; secon
       aria-label={secondary ? '第二终端面板' : '终端面板'}
     >
       <div className="terminal-address">
-        <div className="terminal-connection" title={address}>
-          <ShieldCheck size={13} />
-          <span>
-            {connection.user ? `${connection.user}@` : ''}{connection.host}
-            {connection.type === 'SSH' && <span className="terminal-port">:{connection.port}</span>}
-          </span>
-          <Badge>{connection.type === 'Local' ? 'LOCAL' : 'SSH'}</Badge>
-        </div>
         <Hint label={`点击复制会话 ID · ${session.id}`}>
           <button className="terminal-session-id" aria-label={`复制会话 ID ${session.id}`} onClick={copySessionId}>
+            <ShieldCheck size={13} />
             <span>{session.id}</span>
           </button>
         </Hint>

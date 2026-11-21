@@ -311,10 +311,6 @@
 .terminal-panel { background: transparent; container: terminal-panel / inline-size; }
 .terminal-panel-secondary { border-left: 1px solid var(--border); }
 .terminal-address { height: 32px; min-height: 32px; flex-wrap: nowrap; padding: 0 8px; gap: 8px; background: var(--chrome); border-bottom: 1px solid var(--border); overflow: hidden; }
-.terminal-connection { height: 24px; max-width: min(42%, 380px); padding: 0; gap: 6px; background: transparent; border: 0; border-radius: 0; font-size: 11px; }
-.terminal-connection > svg { color: var(--green); }
-.terminal-connection .terminal-port { margin-left: 0; }
-.terminal-connection .ui-badge { flex-shrink: 0; margin-left: 0; padding: 0; background: transparent; border: 0; }
 .terminal-session-meta { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; min-width: 0; width: auto; margin-left: auto; }
 .terminal-ready { padding: 0; border-radius: 0; background: transparent; color: var(--green); font-size: 9px; white-space: nowrap; }
 .terminal-ready.is-ended { background: transparent; color: var(--muted-foreground); }
@@ -322,8 +318,9 @@
 .terminal-ready.is-attention .status-dot { background: var(--amber); }
 .terminal-frame { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; overflow: hidden; background: var(--terminal-canvas); }
 .terminal-divider { width: 1px; height: 12px; background: var(--border); flex-shrink: 0; }
-.terminal-session-id { height: 20px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--subtle-foreground); }
-.terminal-session-id:hover { background: var(--surface-hover); color: var(--foreground); }
+.terminal-session-id { height: 24px; padding: 0 12px 0 8px; border: 0; border-radius: 4px; background: transparent; color: inherit; font-size: 11px; }
+.terminal-session-id > svg { color: var(--green); flex-shrink: 0; }
+.terminal-session-id:hover { border-radius: 4px; background: var(--surface-hover); color: var(--foreground); }
 .terminal-session-meta > .ui-button { flex-shrink: 0; width: 24px; height: 24px; color: var(--muted-foreground); }
 .terminal-session-meta > .ui-button:hover { color: var(--foreground); background: var(--surface-hover); }
 .terminal-session-meta > .ui-button.terminal-close-button:hover:not(:disabled) { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
@@ -333,7 +330,6 @@
   .terminal-divider { display: none; }
 }
 @container terminal-panel (max-width: 380px) {
-  .terminal-connection .ui-badge { display: none; }
   .terminal-session-id { display: none; }
 }
 /* The welcome screen has useful actions even before the first connection. */
