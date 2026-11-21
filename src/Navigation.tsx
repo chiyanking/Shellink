@@ -112,7 +112,10 @@ export function ContextPanel() {
           title={`${session.name} · ${session.id}${selecting ? ' · 点击选择' : session.status === 'ended' ? ' · 点击打开终端回放 · 右键删除' : ' · 点击切换 AI 自动 / 手动控制'}`}
         >
           {!selecting && <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />}
-          <span className="context-item-text"><strong>{session.name}</strong><small>{connections.find(connection => connection.id === session.connectionId)?.name ?? '已删除连接'} · {session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created}</small></span>
+          <span className="context-item-text"><strong>{session.name}</strong><small>{[
+            session.mode,
+            session.createdAt ? shortTime(session.createdAt) : session.created,
+          ].filter(Boolean).join(' · ')}</small></span>
           {session.status !== 'ended' && (session.mode === 'AUTO' ? <Bot size={12} className="context-mode-icon" /> : <Hand size={12} className="context-mode-icon" />)}
         </button>
       </div>
