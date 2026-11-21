@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent } from 'react'
+import { useEffect, useState } from 'react'
 import {
   ArrowUpRight, Bot, ChevronDown, Code2, FileClock, Globe, Hand, Keyboard,
   FolderPlus, Lock, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
@@ -6,9 +6,9 @@ import {
 } from 'lucide-react'
 import { useDesign, type SettingsTab } from './context'
 import { QUICK_GROUP, shortTime } from './data'
+import { NEW_GROUP_DROP } from './connection-drag'
 import { Badge, ContextMenu, Hint, Input } from './components/ui'
 import { cn } from './lib/utils'
-import { connectionDragProps } from './connection-drag'
 
 export const navigation = [
   { id: 'workspace', label: '工作台', title: 'Workspace', icon: Terminal, shortcut: '1' },
@@ -43,15 +43,12 @@ export function ContextPanel() {
   const {
     page, sessions, selectedSession, openSession, deleteSession, deleteSessions, deletingSessions, openModal, connections, openConnection, editConnection,
     connectionGroup, setConnectionGroup,
-    connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
+    connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, connectionDrag,
+    creatingGroup, setCreatingGroup, newGroupName, setNewGroupName, groupError, setGroupError, pendingGroupDropId, setPendingGroupDropId,
     mcp, client, setClient, settingsTab, setSettingsTab, historyScope, inspectHistory, navigate, runtime, setSessionManual,
   } = useDesign()
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<string[]>([])
-  const [dropGroup, setDropGroup] = useState<string | null>(null)
-  const [newGroupName, setNewGroupName] = useState('')
-  const [creatingGroup, setCreatingGroup] = useState(false)
-  const [groupError, setGroupError] = useState('')
   const [selectingSessions, setSelectingSessions] = useState(false)
   const [selectedDeleteSessionIds, setSelectedDeleteSessionIds] = useState<string[]>([])
   const active = sessions.filter(session => session.status !== 'ended')
@@ -67,31 +64,11 @@ export function ContextPanel() {
   function toggleSessionSelection(id: string) {
     setSelectedDeleteSessionIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
   }
-  function dropProps(group: string) {
-    return {
-      onDragOver: (event: DragEvent<HTMLElement>) => {
-        if (!draggedConnectionId) return
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'move'
-        setDropGroup(group)
-      },
-      onDragLeave: (event: DragEvent<HTMLElement>) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropGroup(null)
-      },
-      onDrop: (event: DragEvent<HTMLElement>) => {
-        if (!draggedConnectionId) return
-        event.preventDefault()
-        moveConnectionToGroup(draggedConnectionId, group)
-        setDraggedConnectionId(null)
-        setDropGroup(null)
-      },
-    }
-  }
   function connectionList(group: string) {
     return profiles.filter(connection => connection.group === group).map(connection => <button
-      className={cn('context-item context-connection', draggedConnectionId === connection.id && 'is-dragging')}
+      className={cn('context-item context-connection', connectionDrag.draggedId === connection.id && 'is-dragging')}
       key={connection.id} onClick={() => editConnection(connection.id)} title={`${connection.name} · ${connection.host} · 点击编辑，可拖动到分组`}
-      {...connectionDragProps(connection.id, setDraggedConnectionId)}
+      {...connectionDrag.dragProps(connection.id, connection.name)}
     ><span className={cn('context-dot', connection.connected ? 'is-live' : 'is-ended')} /><span className="context-item-text"><strong>{connection.name}</strong></span><span className="context-count">{connection.type}</span></button>)
   }
   function sessionList(items: typeof sessions) {
@@ -147,11 +124,11 @@ export function ContextPanel() {
         {page === 'workspace' && <div className="context-group"><div className="context-label">快速连接 <span>{quickProfiles.length}</span></div>{quickProfiles.slice(0, 5).map(connection => <button className="context-item" key={connection.id} onClick={() => openConnection(connection.id)}><Server size={13} /><span className="context-item-text"><strong>{connection.name}</strong></span><ArrowUpRight size={12} /></button>)}{!quickProfiles.length && <button className="context-text-button" onClick={() => profiles.length ? navigate('connections') : openModal('connection')}><Plus size={12} />{profiles.length ? '把连接加入「快速连接」分组' : '添加你的第一个连接'}</button>}</div>}
       </>}
       {page === 'connections' && <>
-        <section className={cn('context-group context-ungrouped', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === '' && 'is-drop-target')} aria-label="分组外的连接" {...dropProps('')}>
+        <section className={cn('context-group context-ungrouped', connectionDrag.draggedId && 'is-drop-zone', connectionDrag.dropGroup === '' && 'is-drop-target')} aria-label="分组外的连接" data-drop-group="">
           {connectionList('')}
-          {draggedConnectionId && <p className="context-drop-hint">拖到这里移出分组</p>}
+          {connectionDrag.dropGroup === '' && <p className="context-drop-hint">拖到这里移出分组</p>}
         </section>
-        {connectionGroups.map(group => <section className={cn('context-group context-connection-group', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === group && 'is-drop-target')} key={group} aria-label={`连接分组 ${group}`} {...dropProps(group)}>
+        {connectionGroups.map(group => <section className={cn('context-group context-connection-group', connectionDrag.draggedId && 'is-drop-zone', connectionDrag.dropGroup === group && 'is-drop-target')} key={group} aria-label={`连接分组 ${group}`} data-drop-group={group}>
           <div className={cn('context-group-heading', connectionGroup === group && 'is-active')}>
             <button className="context-group-toggle" onClick={() => setCollapsed(current => current.includes(group) ? current.filter(value => value !== group) : [...current, group])} aria-label={`${collapsed.includes(group) ? '展开' : '收起'}分组 ${group}`} aria-expanded={!collapsed.includes(group)}><ChevronDown size={12} className={collapsed.includes(group) ? 'is-collapsed' : ''} /></button>
             <button className="context-group-select" aria-pressed={connectionGroup === group} onClick={() => { setConnectionGroup(group); setCollapsed(current => current.filter(value => value !== group)) }}><strong title={group}>{group}</strong><span>{profiles.filter(connection => connection.group === group).length}</span></button>
@@ -162,19 +139,23 @@ export function ContextPanel() {
             }}><Trash2 size={12} /></button></Hint>}
           </div>
           {!collapsed.includes(group) && connectionList(group)}
-          {draggedConnectionId && !profiles.some(connection => connection.group === group) && <p className="context-drop-hint">拖到这里加入分组</p>}
+          {connectionDrag.dropGroup === group && !profiles.some(connection => connection.group === group) && <p className="context-drop-hint">拖到这里加入分组</p>}
         </section>)}
         {creatingGroup ? <form className="context-group-create" aria-label="新建分组" onSubmit={event => {
           event.preventDefault()
-          const error = addConnectionGroup(newGroupName)
+          const name = newGroupName.trim()
+          const error = addConnectionGroup(name)
           setGroupError(error ?? '')
-          if (!error) { setNewGroupName(''); setCreatingGroup(false) }
+          if (!error) {
+            setNewGroupName(''); setCreatingGroup(false)
+            if (pendingGroupDropId) { moveConnectionToGroup(pendingGroupDropId, name); setPendingGroupDropId('') }
+          }
         }}>
           <FolderPlus size={14} />
           <Input autoFocus aria-label="分组名称" placeholder="分组名称，回车创建" value={newGroupName} maxLength={50} onChange={event => { setNewGroupName(event.target.value); setGroupError('') }} onKeyDown={event => {
-            if (event.key === 'Escape') { event.preventDefault(); setCreatingGroup(false); setNewGroupName(''); setGroupError('') }
-          }} onBlur={() => { setCreatingGroup(false); setNewGroupName(''); setGroupError('') }} />
-        </form> : <button className="context-add-group" onClick={() => setCreatingGroup(true)}><Plus size={13} />新建分组</button>}
+            if (event.key === 'Escape') { event.preventDefault(); setCreatingGroup(false); setNewGroupName(''); setGroupError(''); setPendingGroupDropId('') }
+          }} onBlur={() => { setCreatingGroup(false); setNewGroupName(''); setGroupError(''); setPendingGroupDropId('') }} />
+        </form> : <button className={cn('context-add-group', connectionDrag.draggedId && 'is-drop-zone', connectionDrag.dropGroup === NEW_GROUP_DROP && 'is-drop-target')} data-drop-group={NEW_GROUP_DROP} onClick={() => setCreatingGroup(true)}><Plus size={13} />{connectionDrag.draggedId ? '拖到这里新建分组' : '新建分组'}</button>}
         {groupError && <p className="context-group-error" role="alert">{groupError}</p>}
       </>}
       {page === 'integrations' && <>

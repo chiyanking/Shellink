@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { Connection, Page, Session } from './data'
 import type { RuntimeInfo, MCPInfo } from './backend'
+import type { ConnectionDragController } from './connection-drag'
 
 export type Modal = 'connection' | 'session' | 'import' | 'commands' | 'delete-sessions' | null
 export type SettingsTab = 'general' | 'appearance' | 'advanced'
@@ -15,8 +16,16 @@ export type DesignContext = {
   addConnectionGroup: (name: string) => string | null
   deleteConnectionGroup: (name: string) => boolean
   moveConnectionToGroup: (id: string, group: string) => void
-  draggedConnectionId: string | null
-  setDraggedConnectionId: (id: string | null) => void
+  connectionDrag: ConnectionDragController
+  creatingGroup: boolean
+  setCreatingGroup: (value: boolean) => void
+  newGroupName: string
+  setNewGroupName: (value: string) => void
+  groupError: string
+  setGroupError: (value: string) => void
+  /** 拖到「新建分组」入口放下的连接，待分组创建成功后自动移入 */
+  pendingGroupDropId: string
+  setPendingGroupDropId: (id: string) => void
   settingsTab: SettingsTab
   setSettingsTab: (tab: SettingsTab) => void
   client: AIClient

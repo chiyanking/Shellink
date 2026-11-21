@@ -191,6 +191,7 @@
 .context-drop-hint { padding: 9px 8px; color: var(--primary-text); text-align: center; font-size: 10px; pointer-events: none; }
 .context-connection[draggable='true'], .server-card[draggable='true'] { cursor: grab; }
 .context-connection.is-dragging, .server-card.is-dragging { opacity: .45; }
+.drag-ghost { position: fixed; left: 0; top: 0; z-index: 200; max-width: 240px; padding: 5px 11px; border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border)); border-radius: 8px; background: var(--surface-raised); color: var(--foreground); font-size: 11px; box-shadow: 0 8px 24px #00000035; pointer-events: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .context-spacer { flex: 1; min-height: 10px; }
 .context-card { flex-shrink: 0; padding: 13px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); }
 .context-card h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; font-size: 11px; font-weight: 600; }
@@ -240,6 +241,7 @@
 .ui-dialog-overlay { background: var(--overlay); backdrop-filter: blur(5px); }
 .context-add-group { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 6px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--subtle-foreground); text-align: left; font-size: 11px; }
 .context-add-group:hover { background: var(--surface-hover); color: var(--foreground); }
+.context-add-group.is-drop-target { color: var(--primary-text); background: var(--primary-soft); outline: 1px dashed var(--primary); outline-offset: -1px; }
 .context-group-create { display: flex; align-items: center; gap: 8px; min-height: 30px; padding-left: 9px; color: var(--subtle-foreground); }
 .context-group-create > svg { flex-shrink: 0; }
 .context-group-create .ui-input { flex: 1; min-width: 0; height: 28px; font-size: 11px; }

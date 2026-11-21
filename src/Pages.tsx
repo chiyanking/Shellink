@@ -32,13 +32,12 @@ import { Badge, Button, Input, Menu, Select, Switch } from './components/ui'
 import { cn } from './lib/utils'
 import { PageHeading } from './Workspace'
 import { settingsNavigation } from './Navigation'
-import { connectionDragProps } from './connection-drag'
 
 export function ConnectionsPage() {
   const {
     connections, openConnection, openModal, notify, sessions, inspectHistory, editConnection, deleteConnection,
     connectionGroup, setConnectionGroup,
-    draggedConnectionId, setDraggedConnectionId,
+    connectionDrag,
   } = useDesign()
   const [search, setSearch] = useState('')
   const [sortByName, setSortByName] = useState(false)
@@ -76,7 +75,7 @@ export function ConnectionsPage() {
         const activeSessions = active.filter(session => session.connectionId === connection.id)
         const latestSession = sessions.filter(session => session.connectionId === connection.id).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0]
         const address = connection.type === 'SSH' ? `${connection.user}@${connection.host}:${connection.port}` : connection.command ?? 'localhost'
-        return <article key={connection.id} className={cn('server-card', activeSessions.length > 0 && 'is-live', draggedConnectionId === connection.id && 'is-dragging')} {...connectionDragProps(connection.id, setDraggedConnectionId)}>
+        return <article key={connection.id} className={cn('server-card', activeSessions.length > 0 && 'is-live', connectionDrag.draggedId === connection.id && 'is-dragging')} {...connectionDrag.dragProps(connection.id, connection.name)}>
           <div className="server-card-top">
             <span className={cn('server-glyph', `color-${connection.color}`)}>{connection.type === 'Local' ? <Terminal size={20} /> : <Server size={20} />}</span>
             <div className="server-card-name"><h2 title={connection.name}>{connection.name}</h2><p title={address}>{address}</p></div>

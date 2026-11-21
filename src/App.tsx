@@ -23,6 +23,7 @@ import { cn } from './lib/utils'
 import Workspace from './Workspace'
 import { ConnectionsPage, HistoryPage, IntegrationsPage, SettingsPage } from './Pages'
 import SshAuth from './SshAuth'
+import { useConnectionDrag, NEW_GROUP_DROP } from './connection-drag'
 import { ContextPanel, NavigationRail, navigation } from './Navigation'
 
 const pageNames: Record<Page, string> = {
@@ -56,7 +57,6 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [connectionGroupFilter, setConnectionGroupFilter] = useState<string | null>(null)
   const [definedConnectionGroups, setDefinedConnectionGroups] = useState(() => preference<string[]>('connectionGroups', []))
-  const [draggedConnectionId, setDraggedConnectionId] = useState<string | null>(null)
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
   const [client, setClient] = useState<AIClient>('Claude Code')
   const [commandQuery, setCommandQuery] = useState('')
@@ -77,6 +77,15 @@ export default function App() {
   const manual = selectedSession.mode === 'MANUAL'
   const activeSessionCount = sessions.filter(item => item.status !== 'ended').length
   const connectionGroups = [...new Set([QUICK_GROUP, ...definedConnectionGroups, ...connections.filter(item => !item.archived).map(item => item.group)])].filter(Boolean)
+  const [creatingGroup, setCreatingGroup] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [groupError, setGroupError] = useState('')
+  const [pendingGroupDropId, setPendingGroupDropId] = useState('')
+  function handleConnectionDrop(id: string, group: string) {
+    if (group !== NEW_GROUP_DROP) { moveConnectionToGroup(id, group); return }
+    setPendingGroupDropId(id); setGroupError(''); setCreatingGroup(true)
+  }
+  const connectionDrag = useConnectionDrag(handleConnectionDrop)
   const pendingSessionDeletes = sessions.filter(session => session.status === 'ended' && pendingSessionDeleteIds.includes(session.id))
   const refreshBusy = useRef(false)
   const notify = useCallback((text: string) => {
@@ -273,7 +282,8 @@ export default function App() {
       value={{
         coreEpoch, coreReady, connections, runtime, mcp, refresh, editConnection, deleteConnection, font, fontSize, setFont, setFontSize,
         connectionGroup: connectionGroupFilter, setConnectionGroup: setConnectionGroupFilter, settingsTab, setSettingsTab, client, setClient,
-        connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, draggedConnectionId, setDraggedConnectionId,
+        connectionGroups, addConnectionGroup, deleteConnectionGroup, moveConnectionToGroup, connectionDrag,
+        creatingGroup, setCreatingGroup, newGroupName, setNewGroupName, groupError, setGroupError, pendingGroupDropId, setPendingGroupDropId,
         page,
         navigate,
         selected,
