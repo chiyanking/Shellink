@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { useDesign } from './context'
 import { createCommandHighlighter, terminalTheme } from './terminal-appearance'
-import { sessionStatus, type Session } from './data'
+import { QUICK_GROUP, sessionStatus, type Session } from './data'
 import { errorText, onCoreEvent, rpc } from './backend'
 import { Button, Hint, Menu } from './components/ui'
 import { cn } from './lib/utils'
@@ -238,6 +238,7 @@ export default function Workspace() {
   const { selectedSession, sessions, split, openModal, connections, openConnection, openSession, navigate } = useDesign()
   const otherSession = sessions.find(item => item.id !== selectedSession.id && item.status !== 'ended')
   const profiles = connections.filter(connection => !connection.archived)
+  const quickProfiles = profiles.filter(connection => connection.group === QUICK_GROUP)
   const active = sessions.filter(session => session.status !== 'ended')
   if (!selectedSession.id) return <div className="workspace-page workspace-welcome">
     <div className="welcome-heading"><span className="welcome-kicker"><span className="gradient-line" />YOUR TERMINAL, CONNECTED</span><span className="welcome-badge"><ShieldCheck size={12} />本地工作区</span></div>
@@ -246,8 +247,11 @@ export default function Workspace() {
       <h1>连接终端，<span>专注当下。</span></h1>
       <p>从一台主机、一个本地终端开始。<br />与 AI 共享工作区，每一步都由你掌控。</p>
       <div className="welcome-actions"><Button onClick={() => openModal(profiles.length ? 'session' : 'connection')}><Plus size={15} />{profiles.length ? '新建会话' : '添加第一个连接'}<ArrowRight size={14} /></Button><Button variant="outline" onClick={() => navigate('integrations')}><Workflow size={14} />配置 AI 接入</Button></div>
-      <div className="welcome-quick-section"><div className="welcome-section-label"><span>{active.length ? '继续工作' : profiles.length ? '快速连接' : '从这里开始'}</span><span>{active.length ? `${active.length} 个活跃会话` : 'SSH / LOCAL / MCP'}</span></div>
-        <div className="welcome-quick-grid">{active.length ? active.slice(0, 3).map(session => <button key={session.id} onClick={() => openSession(session.id)}><Terminal size={17} /><strong>{session.name}</strong><span>{session.mode} · {sessionStatus[session.status].label}</span><ArrowRight size={13} /></button>) : profiles.length ? profiles.slice(0, 3).map(connection => <button key={connection.id} onClick={() => openConnection(connection.id)}>{connection.type === 'Local' ? <Terminal size={17} /> : <Server size={17} />}<strong>{connection.name}</strong><span>{connection.type === 'Local' ? connection.command : connection.host}</span><ArrowRight size={13} /></button>) : <>
+      {!!active.length && <div className="welcome-quick-section"><div className="welcome-section-label"><span>继续工作</span><span>{active.length} 个活跃会话</span></div>
+        <div className="welcome-quick-grid">{active.slice(0, 3).map(session => <button key={session.id} onClick={() => openSession(session.id)}><Terminal size={17} /><strong>{session.name}</strong><span>{session.mode} · {sessionStatus[session.status].label}</span><ArrowRight size={13} /></button>)}</div>
+      </div>}
+      <div className="welcome-quick-section"><div className="welcome-section-label"><span>快速连接</span><span>{quickProfiles.length ? `${quickProfiles.length} 个连接` : 'SSH / LOCAL / MCP'}</span></div>
+        <div className="welcome-quick-grid">{quickProfiles.length ? quickProfiles.map(connection => <button key={connection.id} onClick={() => openConnection(connection.id)}>{connection.type === 'Local' ? <Terminal size={17} /> : <Server size={17} />}<strong>{connection.name}</strong><span>{connection.type === 'Local' ? connection.command : connection.host}</span><ArrowRight size={13} /></button>) : profiles.length ? <button onClick={() => navigate('connections')}><Server size={17} /><strong>设置快速连接</strong><span>在连接管理里把常用连接加入「快速连接」分组</span><ArrowRight size={13} /></button> : <>
           <button onClick={() => openModal('connection')}><Server size={17} /><strong>管理连接</strong><span>SSH 主机与本地 Shell</span><ArrowRight size={13} /></button>
           <button onClick={() => navigate('integrations')}><Bot size={17} /><strong>接入 AI 工具</strong><span>Claude Code、Codex、Cursor</span><ArrowRight size={13} /></button>
           <button onClick={() => openModal('import')}><PanelsTopLeft size={17} /><strong>导入工作配置</strong><span>带上你熟悉的连接</span><ArrowRight size={13} /></button>

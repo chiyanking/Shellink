@@ -1,11 +1,11 @@
 import { useEffect, useState, type DragEvent } from 'react'
 import {
   ArrowUpRight, Bot, ChevronDown, Code2, FileClock, Globe, Hand, Keyboard,
-  FolderPlus, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
+  FolderPlus, Lock, Monitor, Plus, Search, Server, Settings2, ShieldCheck,
   Terminal, Trash2, Workflow,
 } from 'lucide-react'
 import { useDesign, type SettingsTab } from './context'
-import { shortTime } from './data'
+import { QUICK_GROUP, shortTime } from './data'
 import { Badge, ContextMenu, Hint, Input } from './components/ui'
 import { cn } from './lib/utils'
 import { connectionDragProps } from './connection-drag'
@@ -57,6 +57,7 @@ export function ContextPanel() {
   const active = sessions.filter(session => session.status !== 'ended')
   const ended = sessions.filter(session => session.status === 'ended')
   const profiles = connections.filter(connection => !connection.archived)
+  const quickProfiles = profiles.filter(connection => connection.group === QUICK_GROUP)
   const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase())
   const visibleEnded = ended.filter(session => matches(`${session.name} ${session.id}`))
   const selectedEnded = ended.filter(session => selectedDeleteSessionIds.includes(session.id))
@@ -140,7 +141,7 @@ export function ContextPanel() {
           {sessionList(ended)}{!ended.length && <p className="context-empty">结束的会话会保留在这里</p>}
         </section>
         {!!search && !sessions.some(session => matches(`${session.name} ${session.id}`)) && <p className="context-empty">没有匹配的会话</p>}
-        {page === 'workspace' && <div className="context-group"><div className="context-label">快速连接 <span>{profiles.length}</span></div>{profiles.slice(0, 5).map(connection => <button className="context-item" key={connection.id} onClick={() => openConnection(connection.id)}><Server size={13} /><span className="context-item-text"><strong>{connection.name}</strong></span><ArrowUpRight size={12} /></button>)}{!profiles.length && <button className="context-text-button" onClick={() => openModal('connection')}><Plus size={12} />添加你的第一个连接</button>}</div>}
+        {page === 'workspace' && <div className="context-group"><div className="context-label">快速连接 <span>{quickProfiles.length}</span></div>{quickProfiles.slice(0, 5).map(connection => <button className="context-item" key={connection.id} onClick={() => openConnection(connection.id)}><Server size={13} /><span className="context-item-text"><strong>{connection.name}</strong></span><ArrowUpRight size={12} /></button>)}{!quickProfiles.length && <button className="context-text-button" onClick={() => profiles.length ? navigate('connections') : openModal('connection')}><Plus size={12} />{profiles.length ? '把连接加入「快速连接」分组' : '添加你的第一个连接'}</button>}</div>}
       </>}
       {page === 'connections' && <>
         <section className={cn('context-group context-ungrouped', draggedConnectionId && 'is-drop-zone', draggedConnectionId && dropGroup === '' && 'is-drop-target')} aria-label="分组外的连接" {...dropProps('')}>
@@ -151,11 +152,11 @@ export function ContextPanel() {
           <div className={cn('context-group-heading', connectionGroup === group && 'is-active')}>
             <button className="context-group-toggle" onClick={() => setCollapsed(current => current.includes(group) ? current.filter(value => value !== group) : [...current, group])} aria-label={`${collapsed.includes(group) ? '展开' : '收起'}分组 ${group}`} aria-expanded={!collapsed.includes(group)}><ChevronDown size={12} className={collapsed.includes(group) ? 'is-collapsed' : ''} /></button>
             <button className="context-group-select" aria-pressed={connectionGroup === group} onClick={() => { setConnectionGroup(group); setCollapsed(current => current.filter(value => value !== group)) }}><strong title={group}>{group}</strong><span>{profiles.filter(connection => connection.group === group).length}</span></button>
-            <Hint label={profiles.some(connection => connection.group === group) ? '请先移出分组内的连接，再删除分组' : '删除分组'}><button className="context-group-delete" aria-label={`删除分组 ${group}`} onClick={() => {
+            {group === QUICK_GROUP ? <Hint label="内置分组 · 成员显示在快速连接区，不能删除"><span className="context-group-lock"><Lock size={12} /></span></Hint> : <Hint label={profiles.some(connection => connection.group === group) ? '请先移出分组内的连接，再删除分组' : '删除分组'}><button className="context-group-delete" aria-label={`删除分组 ${group}`} onClick={() => {
               if (deleteConnectionGroup(group)) {
                 setCollapsed(current => current.filter(value => value !== group))
               }
-            }}><Trash2 size={12} /></button></Hint>
+            }}><Trash2 size={12} /></button></Hint>}
           </div>
           {!collapsed.includes(group) && connectionList(group)}
           {draggedConnectionId && !profiles.some(connection => connection.group === group) && <p className="context-drop-hint">拖到这里加入分组</p>}

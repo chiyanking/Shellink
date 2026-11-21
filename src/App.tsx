@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { Design, type AIClient, type Modal, type SettingsTab } from './context'
-import { connectionFrom, sessionFrom, emptyConnection, emptySession, type Connection, type Page, type Session } from './data'
+import { connectionFrom, sessionFrom, emptyConnection, emptySession, QUICK_GROUP, type Connection, type Page, type Session } from './data'
 import { rpc, onCoreEvent, errorText, preference, savePreference, type Profile, type SessionRecord, type RuntimeInfo, type MCPInfo } from './backend'
 import { Button, Dialog, Hint, Input, Select, TooltipProvider } from './components/ui'
 import { cn } from './lib/utils'
@@ -76,7 +76,7 @@ export default function App() {
   const selected = connections.find(item => item.id === selectedSession.connectionId) ?? emptyConnection
   const manual = selectedSession.mode === 'MANUAL'
   const activeSessionCount = sessions.filter(item => item.status !== 'ended').length
-  const connectionGroups = [...new Set([...definedConnectionGroups, ...connections.filter(item => !item.archived).map(item => item.group)])].filter(Boolean)
+  const connectionGroups = [...new Set([QUICK_GROUP, ...definedConnectionGroups, ...connections.filter(item => !item.archived).map(item => item.group)])].filter(Boolean)
   const pendingSessionDeletes = sessions.filter(session => session.status === 'ended' && pendingSessionDeleteIds.includes(session.id))
   const refreshBusy = useRef(false)
   const notify = useCallback((text: string) => {
@@ -220,6 +220,10 @@ export default function App() {
     return null
   }
   function deleteConnectionGroup(name: string) {
+    if (name === QUICK_GROUP) {
+      notify('「快速连接」是内置分组，不能删除')
+      return false
+    }
     if (connections.some(item => !item.archived && item.group === name)) {
       notify('分组内还有连接，请先移出连接后再删除')
       return false

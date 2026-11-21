@@ -4,6 +4,8 @@ export type Page = 'workspace' | 'connections' | 'integrations' | 'history' | 's
 export type SessionStatus = 'ready' | 'running' | 'attention' | 'ended'
 export type Session = { id: string; connectionId: string; name: string; status: SessionStatus; source: 'MCP' | '你' | '未知'; client: string; mode: 'AUTO' | 'MANUAL'; created: string; updated: string; duration: string; command: string; result: string; endedAt?: string; state?: string; createdAt?: number }
 export type Connection = { id: string; name: string; host: string; user: string; group: string; type: 'SSH' | 'Local'; color: 'blue' | 'purple' | 'green'; connected: boolean; system: string; port: number; command?: string; profile?: Profile; archived?: boolean }
+/** 内置分组：加入该分组的连接会显示在欢迎页「快速连接」区，不可删除 */
+export const QUICK_GROUP = '快速连接'
 export const sessionStatus: Record<SessionStatus, { label: string; tone: 'green' | 'blue' | 'amber' | 'neutral' }> = { ready: { label: '等待输入', tone: 'green' }, running: { label: '执行中', tone: 'blue' }, attention: { label: '待接管', tone: 'amber' }, ended: { label: '已结束', tone: 'neutral' } }
 export const emptyConnection: Connection = { id: '', name: '暂无连接', host: '', user: '', group: 'Local', type: 'Local', color: 'green', connected: false, system: '', port: 0 }
 export const emptySession: Session = { id: '', connectionId: '', name: '暂无会话', status: 'ended', source: '未知', client: '未标记来源', mode: 'AUTO', created: '', updated: '', duration: '', command: '', result: '' }

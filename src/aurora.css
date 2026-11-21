@@ -182,6 +182,7 @@
 .context-group-delete { display: grid; place-items: center; align-self: center; flex-shrink: 0; width: 23px; height: 24px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--subtle-foreground); opacity: 0; }
 .context-group-heading:hover .context-group-delete, .context-group-heading:focus-within .context-group-delete { opacity: 1; }
 .context-group-delete:hover { color: var(--red); background: var(--surface-hover); }
+.context-group-lock { display: grid; place-items: center; align-self: center; flex-shrink: 0; width: 23px; height: 24px; color: var(--subtle-foreground); }
 @media (hover: none) { .context-group-delete { opacity: 1; } }
 .context-ungrouped:empty { display: none; }
 .context-connection-group, .context-ungrouped { border: 1px solid transparent; border-radius: 9px; }
@@ -347,6 +348,7 @@
 .welcome-actions { display: flex; gap: 10px; margin-top: 25px; }
 .welcome-actions .ui-button { height: 35px; font-size: 11px; padding: 0 14px; }
 .welcome-quick-section { width: 100%; max-width: 690px; margin-top: 48px; }
+.welcome-quick-section + .welcome-quick-section { margin-top: 26px; }
 .welcome-section-label { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 12px; color: var(--subtle-foreground); font-size: 10px; }
 .welcome-section-label > span:last-child { font: 8px var(--font-mono); letter-spacing: .8px; }
 .welcome-quick-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
