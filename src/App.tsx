@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   ArrowRight,
   ArrowUpRight,
@@ -51,6 +51,24 @@ export default function App() {
   const [font, setFont] = useState(() => preference('font', 'JetBrains Mono'))
   const [fontSize, setFontSize] = useState(() => preference('fontSize', '13'))
   const [sidebar, setSidebar] = useState(() => !window.matchMedia('(max-width: 580px)').matches)
+  const [sidebarWidth, setSidebarWidth] = useState(() => preference('sidebarWidth', 276))
+  const [resizingSidebar, setResizingSidebar] = useState(false)
+  const SIDEBAR_DEFAULT_WIDTH = 276
+  function startSidebarResize(event: ReactMouseEvent) {
+    event.preventDefault()
+    const move = (e: MouseEvent) => setSidebarWidth(Math.min(460, Math.max(220, e.clientX - 56)))
+    const finish = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', finish)
+      document.body.classList.remove('is-resizing-sidebar')
+      setResizingSidebar(false)
+      setSidebarWidth(width => { savePreference('sidebarWidth', width); return width })
+    }
+    document.body.classList.add('is-resizing-sidebar')
+    setResizingSidebar(true)
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', finish)
+  }
   const [split, setSplit] = useState(false)
   const [modal, setModal] = useState<Modal>(null)
   const [toast, setToast] = useState('')
@@ -311,9 +329,18 @@ export default function App() {
     >
       <TooltipProvider delayDuration={350}>
         <div className={cn('desktop-shell', !sidebar && 'sidebar-hidden')}>
-          <div className="desktop-body">
+          <div className="desktop-body" style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
             <NavigationRail />
             <ContextPanel />
+            {sidebar && <div
+              className={cn('sidebar-resizer', resizingSidebar && 'is-active')}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整侧栏宽度"
+              title="拖动调整侧栏宽度 · 双击恢复默认"
+              onMouseDown={startSidebarResize}
+              onDoubleClick={() => { setSidebarWidth(SIDEBAR_DEFAULT_WIDTH); savePreference('sidebarWidth', SIDEBAR_DEFAULT_WIDTH) }}
+            />}
             <main className="app-main">
               <header className="main-topbar">
                 <div className="breadcrumbs">

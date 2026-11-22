@@ -127,6 +127,10 @@
 .avatar-presence { position: absolute; right: -1px; bottom: 0; width: 7px; height: 7px; border: 2px solid var(--rail); border-radius: 50%; background: var(--green); }
 .avatar-presence.is-offline, .status-dot.is-offline { background: var(--subtle-foreground); box-shadow: none; }
 .context-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--sidebar); border-right: 1px solid var(--border); overflow: hidden; }
+.sidebar-resizer { position: absolute; top: 0; bottom: 0; left: calc(56px + var(--sidebar-width) - 3px); width: 7px; z-index: 50; cursor: col-resize; }
+.sidebar-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background .15s; }
+.sidebar-resizer:hover::after, .sidebar-resizer.is-active::after { width: 2px; background: var(--primary); }
+body.is-resizing-sidebar { cursor: col-resize; user-select: none; }
 .context-heading { display: flex; align-items: center; justify-content: space-between; min-height: 60px; padding: 14px 16px 10px; }
 .context-heading > span { font-size: 11px; font-weight: 600; letter-spacing: 1.8px; color: var(--muted-foreground); }
 .context-heading .ui-button { height: 26px; padding: 0 10px; font-size: 11px; gap: 5px; }
@@ -388,6 +392,26 @@
 .font-preview { color: var(--terminal-foreground); border-color: var(--terminal-border); border-radius: 9px; background: var(--terminal-canvas); }
 .font-preview > span { color: var(--terminal-prompt); }
 .history-session-scope { border-radius: 12px; }
+.history-detail-bar { display: flex; align-items: center; gap: 12px; padding: 4px 0 16px; }
+.history-detail-bar > .ui-button:first-child { flex-shrink: 0; }
+.history-detail-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.history-detail-title > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-size: 13px; }
+.history-detail-title .ui-badge { flex-shrink: 0; }
+.history-detail-search { flex: 1; max-width: 340px; margin-left: auto; min-height: 30px; }
+.history-detail-bar > .ui-button { flex-shrink: 0; height: 30px; }
+.history-session-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.history-session-card-wrap { position: relative; display: flex; }
+.history-session-card-wrap.is-active { border-radius: 12px; box-shadow: var(--accent-shadow); }
+.history-session-card { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 13px 15px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); text-align: left; }
+.history-session-card:hover { border-color: var(--primary); background: var(--surface-raised); }
+.history-session-card-wrap.is-active .history-session-card { border-color: var(--primary); background: var(--surface-raised); }
+.history-session-card-wrap.is-active .history-session-card > strong { color: var(--primary-text); }
+.history-session-detail { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--subtle-foreground); cursor: pointer; opacity: 0; transition: opacity .12s; }
+.history-session-card-wrap:hover .history-session-detail, .history-session-card-wrap.is-active .history-session-detail { opacity: 1; }
+.history-session-detail:hover { background: var(--surface-hover); color: var(--primary-text); }
+.history-session-card > strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-size: 12.5px; }
+.history-session-card > small { color: var(--muted-foreground); font-size: 10.5px; }
+.history-session-card > svg { margin-left: auto; color: var(--subtle-foreground); }
 .history-feed { border: 0; background: transparent; }
 .history-entry { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px; }
 .history-entry-content pre { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px; padding: 12px; color: var(--foreground); }
@@ -432,6 +456,7 @@
   .rail-button.is-active::before { left: -7px; }
   .rail-logo { width: 31px; height: 31px; }
   .context-panel { position: absolute; left: 48px; top: 0; bottom: 0; width: 240px; z-index: 40; box-shadow: 20px 0 80px var(--overlay); }
+  .sidebar-resizer { display: none; }
   .app-main { grid-column: 2; }
   .main-topbar { background: var(--chrome); height: 52px; min-height: 52px; padding: 0 10px; gap: 8px; }
   .topbar-title strong { font-size: 10px; }
