@@ -184,6 +184,37 @@ export default function App() {
     setModal('delete-sessions')
   }
   function deleteSession(id: string) { deleteSessions([id]) }
+  async function removeSessions(targets: typeof sessions) {
+    deletingSessionsRef.current = true
+    setDeletingSessions(true)
+    const deleted = new Set<string>()
+    const failedIds: string[] = []
+    let failure = ''
+    try {
+      for (const session of targets) {
+        try { await rpc('sessions.removeRecord', { id: session.id }); deleted.add(session.id) }
+        catch (error) { failure ||= errorText(error); failedIds.push(session.id) }
+      }
+      if (deleted.size) {
+        setSessions(current => current.filter(item => !deleted.has(item.id)))
+        setSelectedSessionId(current => deleted.has(current) ? '' : current)
+        setHistoryScope(current => current.sessionId && deleted.has(current.sessionId) ? {} : current)
+      }
+      await refresh()
+      return { deletedCount: deleted.size, total: targets.length, failure, failedIds }
+    } finally {
+      deletingSessionsRef.current = false
+      setDeletingSessions(false)
+    }
+  }
+  async function deleteSessionsDirect(ids: string[]) {
+    if (deletingSessionsRef.current) return
+    const targets = sessions.filter(session => session.status === 'ended' && ids.includes(session.id))
+    if (!targets.length) { notify('请选择已结束的会话'); return }
+    const { deletedCount, total, failure } = await removeSessions(targets)
+    if (deletedCount === total) notify(`已删除 ${deletedCount} 个会话及其终端历史`)
+    else notify(`已删除 ${deletedCount} 个会话，${total - deletedCount} 个删除失败：${failure}`)
+  }
   function cancelSessionDeletion() {
     if (deletingSessionsRef.current) return
     setModal(null)
@@ -193,33 +224,15 @@ export default function App() {
   async function confirmSessionDeletion() {
     const targets = pendingSessionDeletes
     if (deletingSessionsRef.current || !targets.length) return
-    deletingSessionsRef.current = true
-    setDeletingSessions(true)
     setSessionDeleteError('')
-    const deleted = new Set<string>()
-    let failure = ''
-    try {
-      for (const session of targets) {
-        try { await rpc('sessions.removeRecord', { id: session.id }); deleted.add(session.id) }
-        catch (error) { failure ||= errorText(error) }
-      }
-      if (deleted.size) {
-        setSessions(current => current.filter(item => !deleted.has(item.id)))
-        setSelectedSessionId(current => deleted.has(current) ? '' : current)
-        setHistoryScope(current => current.sessionId && deleted.has(current.sessionId) ? {} : current)
-      }
-      await refresh()
-      if (deleted.size === targets.length) {
-        setModal(null)
-        setPendingSessionDeleteIds([])
-        notify(`已删除 ${deleted.size} 个会话及其终端历史`)
-      } else {
-        setPendingSessionDeleteIds(targets.filter(session => !deleted.has(session.id)).map(session => session.id))
-        setSessionDeleteError(`已删除 ${deleted.size} 个会话，${targets.length - deleted.size} 个删除失败：${failure}`)
-      }
-    } finally {
-      deletingSessionsRef.current = false
-      setDeletingSessions(false)
+    const { deletedCount, total, failure, failedIds } = await removeSessions(targets)
+    if (deletedCount === total) {
+      setModal(null)
+      setPendingSessionDeleteIds([])
+      notify(`已删除 ${deletedCount} 个会话及其终端历史`)
+    } else {
+      setPendingSessionDeleteIds(failedIds)
+      setSessionDeleteError(`已删除 ${deletedCount} 个会话，${total - deletedCount} 个删除失败：${failure}`)
     }
   }
   function inspectHistory(sessionId: string, eventId?: string) { navigate('history'); setHistoryScope({ sessionId, eventId }) }
@@ -311,6 +324,7 @@ export default function App() {
         openWelcome,
         deleteSession,
         deleteSessions,
+        deleteSessionsDirect,
         deletingSessions,
         inspectSession,
         historyScope,

@@ -48,6 +48,7 @@ export type DesignContext = {
   openWelcome: () => void
   deleteSession: (id: string) => void
   deleteSessions: (ids: string[]) => void
+  deleteSessionsDirect: (ids: string[]) => void
   deletingSessions: boolean
   inspectSession: (id: string) => void
   historyScope: { sessionId?: string; eventId?: string }

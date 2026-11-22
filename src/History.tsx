@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, FileClock, Info, Search } from 'lucide-react'
+import { ArrowRight, FileClock, Search, Trash2 } from 'lucide-react'
 import { rpc, type HistoryChunk } from './backend'
 import { useDesign } from './context'
 import { sessionStatus, shortTime } from './data'
@@ -10,15 +10,19 @@ import { PageHeading } from './Workspace'
 type ChunkPage = { items: HistoryChunk[]; cursor: number; hasMore: boolean }
 
 export default function HistoryPage() {
-  const { sessions, historyScope, inspectSession, notify } = useDesign()
+  const { sessions, historyScope, inspectSession, notify, deleteSessions, deleteSessionsDirect, deletingSessions } = useDesign()
   const [sessionId, setSessionId] = useState(historyScope.sessionId ?? 'all')
   const [items, setItems] = useState<HistoryChunk[]>([])
   const [cursor, setCursor] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
+  const [selecting, setSelecting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const selectedSession = sessions.find(session => session.id === sessionId)
   const orderedSessions = useMemo(() => [...sessions].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [sessions])
+  const endedSessions = useMemo(() => orderedSessions.filter(session => session.status === 'ended'), [orderedSessions])
+  const endedSelected = endedSessions.length > 0 && endedSessions.every(session => selectedIds.includes(session.id))
   const filtered = useMemo(() => items.filter(item => `${item.direction} ${item.plain} ${item.sessionId}`.toLowerCase().includes(search.toLowerCase())), [items, search])
   useEffect(() => { setSessionId(historyScope.sessionId ?? 'all') }, [historyScope.sessionId])
   useEffect(() => {
@@ -41,21 +45,46 @@ export default function HistoryPage() {
   }
   return <div className="standard-page history-page">
     <PageHeading eyebrow="SESSION STREAM" title="历史记录" description="按 session 查看后台保存的原始输入与合并终端输出。" />
+    {endedSessions.length > 0 && <div className="history-picker-bar">
+      <span>{orderedSessions.length} 个会话 · {endedSessions.length} 个已结束</span>
+      {selecting && <label className="context-select-all"><input type="checkbox" aria-label="全选已结束会话" checked={endedSelected} disabled={deletingSessions} onChange={event => setSelectedIds(event.target.checked ? endedSessions.map(session => session.id) : [])} />全选已结束</label>}
+      {selecting && <button className="context-delete-selected" disabled={deletingSessions || !selectedIds.length} onClick={() => { deleteSessions(selectedIds); setSelecting(false); setSelectedIds([]) }}>{deletingSessions ? '删除中…' : `删除所选 (${selectedIds.length})`}</button>}
+      <button className="context-bulk-delete" disabled={deletingSessions} onClick={() => { setSelecting(!selecting); setSelectedIds([]) }}>{selecting ? '取消' : '批量删除'}</button>
+    </div>}
     <div className="history-session-picker">
       {orderedSessions.map(session => <div className={cn('history-session-card-wrap', session.id === sessionId && 'is-active')} key={session.id}>
-        <button className="history-session-card" onClick={() => setSessionId(current => current === session.id ? 'all' : session.id)} title={session.id === sessionId ? '再次点击取消选择' : `查看 ${session.name} 的终端历史`}>
+        <button
+          className={cn('history-session-card', selecting && selectedIds.includes(session.id) && 'is-checked')}
+          onClick={() => {
+            if (selecting) {
+              if (session.status !== 'ended') return
+              setSelectedIds(current => current.includes(session.id) ? current.filter(id => id !== session.id) : [...current, session.id])
+              return
+            }
+            setSessionId(current => current === session.id ? 'all' : session.id)
+          }}
+          title={selecting ? (session.status === 'ended' ? '点击选择该会话' : '仅已结束的会话可批量删除') : session.id === sessionId ? '再次点击取消选择' : `查看 ${session.name} 的终端历史`}
+        >
           <strong>{session.name}</strong>
           <small>{session.mode} · {session.createdAt ? shortTime(session.createdAt) : session.created} · {sessionStatus[session.status].label}</small>
-          <ArrowRight size={13} />
+          <span
+            role="button"
+            tabIndex={0}
+            className="history-session-open"
+            aria-label={`查看 ${session.name} 的会话详情`}
+            title="会话详情"
+            onClick={event => { event.stopPropagation(); inspectSession(session.id) }}
+            onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); inspectSession(session.id) } }}
+          ><ArrowRight size={13} /></span>
         </button>
-        <Hint label="查看会话详情"><span
+        {session.status === 'ended' && <Hint label="删除会话（终端历史一并删除，不再确认）"><span
           role="button"
           tabIndex={0}
-          className="history-session-detail"
-          aria-label={`查看 ${session.name} 的会话详情`}
-          onClick={event => { event.stopPropagation(); inspectSession(session.id) }}
-          onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); inspectSession(session.id) } }}
-        ><Info size={13} /></span></Hint>
+          className="history-session-detail history-session-delete"
+          aria-label={`删除会话 ${session.name}`}
+          onClick={event => { event.stopPropagation(); deleteSessionsDirect([session.id]) }}
+          onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); deleteSessionsDirect([session.id]) } }}
+        ><Trash2 size={13} /></span></Hint>}
       </div>)}
       {!orderedSessions.length && <div className="empty-state"><FileClock size={26} /><h3>还没有任何会话</h3><p>创建会话后，终端历史会按 session 保存在这里。</p></div>}
     </div>
