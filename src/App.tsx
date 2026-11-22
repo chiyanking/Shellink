@@ -369,11 +369,11 @@ export default function App() {
         </div>
         <SshAuth enabled={coreReady} sessions={sessions} onChange={refresh} />
         <Dialog open={modal === 'delete-sessions'} onOpenChange={open => { if (!open) cancelSessionDeletion() }} title="删除会话" description={`确定删除所选 ${pendingSessionDeletes.length} 个已结束的会话？会话记录及终端历史将一并删除。`}>
-          <ul className="session-delete-list">{pendingSessionDeletes.map(session => <li key={session.id}>{session.name}</li>)}</ul>
+          <ul className="session-delete-list">{pendingSessionDeletes.map(session => <li key={session.id}><strong>{session.name}</strong><small>{session.mode} · 创建于 {session.created || '未知时间'} · 持续 {session.duration}</small></li>)}</ul>
           {sessionDeleteError && <p className="session-delete-error" role="alert">{sessionDeleteError}</p>}
           <div className="dialog-footer">
             <Button variant="outline" disabled={deletingSessions} onClick={cancelSessionDeletion}>取消</Button>
-            <Button variant="danger" disabled={deletingSessions || !pendingSessionDeletes.length} onClick={() => void confirmSessionDeletion()}>{deletingSessions ? '删除中…' : `删除 ${pendingSessionDeletes.length} 个会话`}</Button>
+            <Button variant="danger" disabled={deletingSessions || !pendingSessionDeletes.length} onClick={() => void confirmSessionDeletion()}>{deletingSessions ? '删除中…' : '确定'}</Button>
           </div>
         </Dialog>
         <Dialog
