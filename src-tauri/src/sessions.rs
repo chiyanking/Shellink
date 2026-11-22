@@ -109,7 +109,7 @@ impl SessionManager {
             return Err("Terminal dimensions are invalid".into());
         }
         let id = format!(
-            "rust-session-{}-{}",
+            "shellink-session-{}-{}",
             crate::data::session_now(),
             self.next_id.fetch_add(1, Ordering::Relaxed)
         );
