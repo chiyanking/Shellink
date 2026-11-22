@@ -85,8 +85,8 @@ export function ContextPanel() {
             ? toggleSessionSelection(session.id)
             : page === 'history' ? inspectHistory(session.id)
               : session.status === 'ended' ? openSession(session.id)
-                : setSessionManual(session.id, session.mode === 'AUTO')}
-          title={`${session.name} · ${session.id}${selecting ? ' · 点击选择' : session.status === 'ended' ? ' · 点击打开终端回放 · 右键删除' : ' · 点击切换 AI 自动 / 手动控制'}`}
+                : (() => { setSessionManual(session.id, session.mode === 'AUTO'); openSession(session.id) })()}
+          title={`${session.name} · ${session.id}${selecting ? ' · 点击选择' : session.status === 'ended' ? ' · 点击打开终端回放 · 右键删除' : ' · 点击切换 AI 自动 / 手动控制并跳转到该会话'}`}
         >
           {!selecting && <span className={cn('context-dot', session.status === 'ended' ? 'is-ended' : session.status === 'attention' ? 'is-attention' : 'is-live')} />}
           <span className="context-item-text"><strong>{session.name}</strong><small>{[
